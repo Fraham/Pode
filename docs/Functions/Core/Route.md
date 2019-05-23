@@ -11,6 +11,9 @@ Routes can also be bound against a specific protocol or endpoint. This allows yo
 !!! info
     The scriptblock supplied for the main route logic is invoked with a single parameter for the current web event. This parameter will contain the `Request` and `Response` objects; `Data` (from POST requests), and the `Query` (from the query string of the URL), as well as any `Parameters` from the route itself (eg: `/:accountId`).
 
+!!! tip
+    You can force a content type for a route's payload by using the `-ContentType` parameter. By setting it, Pode will attempt to parse any request payload as that content type - regardless of what might be set on the request.
+
 ## Examples
 
 ### Example 1
@@ -18,7 +21,7 @@ Routes can also be bound against a specific protocol or endpoint. This allows yo
 The following example sets up a `GET /ping` route, that returns `{ "value": "pong" }`:
 
 ```powershell
-Server {
+server {
     listen *:8080 http
 
     route get '/ping' {
@@ -29,10 +32,30 @@ Server {
 
 ### Example 2
 
+The following example sets up a `GET /ping` route, and the scriptblock to use is sourced from an external script:
+
+*server.ps1*
+```powershell
+server {
+    listen *:8080 http
+
+    route get '/ping' -fp './routes/ping.ps1'
+}
+```
+
+*./routes/ping.ps1*
+```powershell
+return {
+    json @{ 'value' = 'ping' }
+}
+```
+
+### Example 3
+
 The following example sets up a `GET /ping` route, and then removes it:
 
 ```powershell
-Server {
+server {
     listen *:8080 http
 
     route get '/ping' {
@@ -43,12 +66,12 @@ Server {
 }
 ```
 
-### Example 3
+### Example 4
 
 The following example sets up a `POST /users` route, that creates a new user using post data:
 
 ```powershell
-Server {
+server {
     listen *:8080 http
 
     route post '/users' {
@@ -63,12 +86,12 @@ Server {
 }
 ```
 
-### Example 4
+### Example 5
 
 The following example sets up a static route of `/assets` using the directory `./content/assets`. In the `home.html` view if you reference the image `<img src="/assets/images/icon.png" />`, then Pode will get the image from `./content/assets/images/icon.png`.
 
 ```powershell
-Server {
+server {
     listen *:8080 http
 
     route static '/assets' './content/assets'
@@ -82,12 +105,12 @@ Server {
 !!! tip
     Furthermore, if you attempt to navigate to `http://localhost:8080/assets`, then Pode will attempt to display a default page such as `index.html` - [see here](../../../Tutorials/Routes/Overview#default-pages).
 
-### Example 5
+### Example 6
 
 The following example sets up a `GET /users/:userId` route, that returns a user based on the route parameter `userId`:
 
 ```powershell
-Server {
+server {
     listen *:8080 http
 
     route get '/users/:userId'{
@@ -107,12 +130,12 @@ Server {
 }
 ```
 
-### Example 6
+### Example 7
 
 The following example sets up a `GET /` route, that has custom middleware to check the user agent first. If the user agent is from PowerShell deny the call, and don't invoke the route's logic:
 
 ```powershell
-Server {
+server {
     listen *:8080 http
 
     $agent_mid = {
@@ -137,12 +160,12 @@ Server {
 }
 ```
 
-### Example 7
+### Example 8
 
 The following example sets up two `GET /ping` routes: one that applies to only http requests, and another for everything else:
 
 ```powershell
-Server {
+server {
     listen *:8080 http
 
     route get '/ping' {
@@ -155,12 +178,12 @@ Server {
 }
 ```
 
-### Example 8
+### Example 9
 
 The following example sets up two `GET /ping` routes: one that applies to one endpoint, and the other to the other endpoint:
 
 ```powershell
-Server {
+server {
     listen pode.foo.com:8080 http
     listen pode.bar.com:8080 http
 
@@ -174,12 +197,12 @@ Server {
 }
 ```
 
-### Example 9
+### Example 10
 
 The following example sets up two `GET /ping` routes: one that applies to one endpoint, and the other to the other endpoint; this is done using the name supplied to the `listen` function:
 
 ```powershell
-Server {
+server {
     listen pode.foo.com:8080 http -name 'pode1'
     listen pode.bar.com:8080 http -name 'pode2'
 
@@ -201,11 +224,15 @@ Server {
 | Route | string | true | The route path to listen on, the root path is `/`. The path can also contain parameters such as `/:userId` | empty |
 | Middleware | object[] | false | Custom middleware for the `route` that will be invoked before the main logic is invoked - such as authentication. For non-static routes this is an array of `scriptblocks`, but for a static route this is the path to the static content directory | null |
 | ScriptBlock | scriptblock | true | The main route logic that will be invoked when the route endpoint is hit | null |
-| Defaults | string[] | false | For static routes only, this is an array of default pages that could be displayed when the static directory is called | ['index.html', 'index.htm', 'default.html', 'default.htm'] |
+| FilePath | string | false | A file path to a script that will return a scriptblock for the main route logic | null |
+| Defaults | string[] | false | For static routes only. This is an array of default pages that could be displayed when the static directory is called | ['index.html', 'index.htm', 'default.html', 'default.htm'] |
 | Protocol | string | false | The protocol to bind the route against (Values: Empty, HTTP, HTTPS) | empty |
 | Endpoint | string | false | The endpoint to bind the route against - this will typically be the endpoint used in your `listen` function | empty |
 | ListenName | string | false | The name of a [`listen`](../Listen) endpoint to bind the route against. This can be use instead of `-Protocol` and `-Endpoint`, but if used with them, will override their values | empty |
+| ContentType | string | false | If supplied, Pode will attempt to parse any request payload as the supplied content type - regardless of what might be set on the request. (eg: `application/json`) | empty |
+| ErrorType | string | false | If supplied, When an error occurs in the route, Pode will attempt to render an error page using the supplied content type. (eg: `application/json`) | empty |
 | Remove | switch | false | When passed, will remove a defined route | false |
+| DownloadOnly | switch | false | For static routes only. If passed, will cause all files in the static directory to be attached for downloading rather than rendered | false |
 
 !!! tip
     The special `*` method allows you to bind a route against every HTTP method. This method takes priority over the other methods; if you have a route for `/` against `GET` and `*`, then the `*` method will be used.

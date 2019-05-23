@@ -14,18 +14,17 @@ function Invoke-PodeMiddleware
     )
 
     # if there's no middleware, do nothing
-    if (Test-Empty $Middleware) {
+    if ($null -eq $Middleware -or $Middleware.Length -eq 0) {
         return $true
     }
 
     # filter the middleware down by route (retaining order)
-    if (!(Test-Empty $Route))
+    if (![string]::IsNullOrWhiteSpace($Route))
     {
-        $Middleware = @($Middleware | Where-Object {
-            (Test-Empty $_.Route) -or
-            ($_.Route -ieq '/') -or
-            ($_.Route -ieq $Route) -or
-            ($Route -imatch "^$($_.Route)$")
+        $Middleware = @(foreach ($mware in $Middleware) {
+            if ([string]::IsNullOrWhiteSpace($mware.Route) -or ($mware.Route -ieq '/') -or ($mware.Route -ieq $Route) -or ($Route -imatch "^$($mware.Route)$")) {
+                $mware
+            }
         })
     }
 
@@ -127,8 +126,8 @@ function Get-PodePublicMiddleware
         param($e)
 
         # get the static file path
-        $path = Get-PodeStaticRoutePath -Route $e.Path -Protocol $e.Protocol -Endpoint $e.Endpoint
-        if ($null -eq $path) {
+        $info = Get-PodeStaticRoutePath -Route $e.Path -Protocol $e.Protocol -Endpoint $e.Endpoint
+        if ([string]::IsNullOrWhiteSpace($info.Path)) {
             return $true
         }
 
@@ -147,8 +146,13 @@ function Get-PodePublicMiddleware
             }
         }
 
-        # write the file to the response
-        Write-PodeValueToResponseFromFile -Path $path -Cache:$caching
+        # write, or attach, the file to the response
+        if ($info.Download) {
+            Attach -Path $e.Path
+        }
+        else {
+            File -Path $info.Path -MaxAge $PodeContext.Server.Web.Static.Cache.MaxAge -Cache:$caching
+        }
 
         # static content found, stop
         return $false
@@ -174,6 +178,14 @@ function Get-PodeRouteValidateMiddleware
             # set the route parameters
             $WebEvent.Parameters = $route.Parameters
 
+            # override the content type from the route if it's not empty
+            if (![string]::IsNullOrWhiteSpace($route.ContentType)) {
+                $WebEvent.ContentType = $route.ContentType
+            }
+
+            # set the content type for any pages for the route if it's not empty
+            $WebEvent.ErrorType = $route.ErrorType
+
             # route exists
             return $true
         }
@@ -187,7 +199,7 @@ function Get-PodeBodyMiddleware
 
         try {
             # attempt to parse that data
-            $result = ConvertFrom-PodeRequestContent -Request $e.Request
+            $result = ConvertFrom-PodeRequestContent -Request $e.Request -ContentType $e.ContentType
 
             # set session data
             $e.Data = $result.Data

@@ -615,10 +615,9 @@ Describe 'ConvertFrom-PodeRequestContent' {
             $value = '<root><value>test</value></root>'
             Mock Read-PodeStreamToEnd { return $value }
 
-            $result = ConvertFrom-PodeRequestContent @{
-                'ContentType' = 'text/xml';
+            $result = ConvertFrom-PodeRequestContent -Request @{
                 'ContentEncoding' = [System.Text.Encoding]::UTF8;
-            }
+            } -ContentType 'text/xml'
 
             $result.Data | Should Not Be $null
             $result.Data.root | Should Not Be $null
@@ -629,10 +628,9 @@ Describe 'ConvertFrom-PodeRequestContent' {
             $value = '{ "value": "test" }'
             Mock Read-PodeStreamToEnd { return $value }
 
-            $result = ConvertFrom-PodeRequestContent @{
-                'ContentType' = 'application/json';
+            $result = ConvertFrom-PodeRequestContent -Request @{
                 'ContentEncoding' = [System.Text.Encoding]::UTF8;
-            }
+            } -ContentType 'application/json'
 
             $result.Data | Should Not Be $null
             $result.Data.value | Should Be 'test'
@@ -642,10 +640,9 @@ Describe 'ConvertFrom-PodeRequestContent' {
             $value = "value`ntest"
             Mock Read-PodeStreamToEnd { return $value }
 
-            $result = ConvertFrom-PodeRequestContent @{
-                'ContentType' = 'text/csv';
+            $result = ConvertFrom-PodeRequestContent -Request @{
                 'ContentEncoding' = [System.Text.Encoding]::UTF8;
-            }
+            } -ContentType 'text/csv'
 
             $result | Should Not Be $null
             $result.Data[0].value | Should Be 'test'
@@ -655,10 +652,9 @@ Describe 'ConvertFrom-PodeRequestContent' {
             $value = "test"
             Mock Read-PodeStreamToEnd { return $value }
             
-            (ConvertFrom-PodeRequestContent @{
-                'ContentType' = 'text/custom';
+            (ConvertFrom-PodeRequestContent -Request @{
                 'ContentEncoding' = [System.Text.Encoding]::UTF8;
-            }).Data | Should Be 'test'
+            } -ContentType 'text/custom').Data | Should Be 'test'
         }
     }
 }
@@ -672,7 +668,21 @@ Describe 'Test-PodePathIsFile' {
         It 'Returns false for a directory' {
             Test-PodePathIsFile -Path './some/path/folder' | Should Be $false
         }
+
+        It 'Returns false for a wildcard' {
+            Test-PodePathIsFile -Path './some/path/*' -FailOnWildcard | Should Be $false
+        }
     }
+}
+
+Describe 'Test-PodePathIsWildcard' {
+        It 'Returns true for a wildcard' {
+            Test-PodePathIsWildcard -Path './some/path/*' | Should Be $true
+        }
+
+        It 'Returns false for no wildcard' {
+            Test-PodePathIsWildcard -Path './some/path/folder' | Should Be $false
+        }
 }
 
 Describe 'Test-PodePathIsDirectory' {
@@ -693,6 +703,10 @@ Describe 'Test-PodePathIsDirectory' {
 
         It 'Returns false for a file' {
             Test-PodePathIsDirectory -Path './some/path/file.txt' | Should Be $false
+        }
+
+        It 'Returns false for a wildcard' {
+            Test-PodePathIsDirectory -Path './some/path/*' -FailOnWildcard | Should Be $false
         }
     }
 }
@@ -849,5 +863,178 @@ Describe 'Set-PodeCertificate' {
         Set-PodeCertificate -Address 'localhost' -Port 8080 -Certificate 'name' | Out-Null
 
         Assert-MockCalled Write-Host -Times 1 -Scope It
+    }
+}
+
+Describe 'Get-PodeUrl' {
+    It 'Returns a url from the web event' {
+        $WebEvent = @{
+            'Protocol' = 'http';
+            'Endpoint' = 'foo.com/';
+            'Path' = 'about'
+        }
+
+        Get-PodeUrl | Should Be 'http://foo.com/about'
+    }
+}
+
+Describe 'Convert-PodePathPatternToRegex' {
+    It 'Convert a path to regex' {
+        Convert-PodePathPatternToRegex -Path '/api*' | Should Be '^[\\/]api.*?$'
+    }
+
+    It 'Convert a path to regex non-strict' {
+        Convert-PodePathPatternToRegex -Path '/api*' -NotStrict | Should Be '[\\/]api.*?'
+    }
+
+    It 'Convert a path to regex, but not slashes' {
+        Convert-PodePathPatternToRegex -Path '/api*' -NotSlashes | Should Be '^/api.*?$'
+    }
+
+    It 'Convert a path to regex, but not slashes and non-strict' {
+        Convert-PodePathPatternToRegex -Path '/api*' -NotSlashes -NotStrict | Should Be '/api.*?'
+    }
+}
+
+Describe 'Convert-PodePathPatternsToRegex' {
+    It 'Convert paths to regex' {
+        Convert-PodePathPatternsToRegex -Paths @('/api*', '/users*') | Should Be '^([\\/]api.*?|[\\/]users.*?)$'
+    }
+
+    It 'Convert paths to regex non-strict' {
+        Convert-PodePathPatternsToRegex -Paths @('/api*', '/users*') -NotStrict | Should Be '([\\/]api.*?|[\\/]users.*?)'
+    }
+
+    It 'Convert paths to regex, but not slashes' {
+        Convert-PodePathPatternsToRegex -Paths @('/api*', '/users*') -NotSlashes | Should Be '^(/api.*?|/users.*?)$'
+    }
+
+    It 'Convert paths to regex, but not slashes and non-strict' {
+        Convert-PodePathPatternsToRegex -Paths @('/api*', '/users*') -NotSlashes -NotStrict | Should Be '(/api.*?|/users.*?)'
+    }
+}
+
+Describe 'ConvertFrom-PodeFile' {
+    It 'Generates dynamic content' {
+        $content = 'Value = $(1+1)'
+        ConvertFrom-PodeFile -Content $content | Should Be 'Value = 2'
+    }
+
+    It 'Generates dynamic content, using parameters' {
+        $content = 'Value = $($data["number"])'
+        ConvertFrom-PodeFile -Content $content -Data @{ 'number' = 3 } | Should Be 'Value = 3'
+    }
+}
+
+Describe 'Test-PodePathIsRelative' {
+    It 'Returns true for .' {
+        Test-PodePathIsRelative -Path '.' | Should Be $true
+    }
+
+    It 'Returns true for ..' {
+        Test-PodePathIsRelative -Path '..' | Should Be $true
+    }
+
+    It 'Returns true for relative file' {
+        Test-PodePathIsRelative -Path './file.txt' | Should Be $true
+    }
+
+    It 'Returns true for relative folder' {
+        Test-PodePathIsRelative -Path '../folder' | Should Be $true
+    }
+
+    It 'Returns false for literal windows path' {
+        Test-PodePathIsRelative -Path 'c:/path' | Should Be $false
+    }
+
+    It 'Returns false for literal nix path' {
+        Test-PodePathIsRelative -Path '/path' | Should Be $false
+    }
+}
+
+Describe 'Get-PodeRelativePath' {
+    $PodeContext = @{ 'Server' = @{ 'Root' = 'c:/' } }
+
+    It 'Returns back a literal path' {
+        Mock Test-PodePathIsRelative { return $false }
+        Get-PodeRelativePath -Path 'c:/path' | Should Be 'c:/path'
+    }
+
+    It 'Returns null for non-existent literal path when resolving' {
+        Mock Test-PodePathIsRelative { return $false }
+        Mock Resolve-Path { return $null }
+        Get-PodeRelativePath -Path 'c:/path' -Resolve | Should Be ([string]::Empty)
+    }
+
+    It 'Returns path for literal path when resolving' {
+        Mock Test-PodePathIsRelative { return $false }
+        Mock Resolve-Path { return @{ 'Path' = 'c:/path' } }
+        Get-PodeRelativePath -Path 'c:/path' -Resolve | Should Be 'c:/path'
+    }
+
+    It 'Returns back a relative path' {
+        Mock Test-PodePathIsRelative { return $true }
+        Get-PodeRelativePath -Path './path' | Should Be './path'
+    }
+
+    It 'Returns null for a non-existent relative path when resolving' {
+        Mock Test-PodePathIsRelative { return $true }
+        Mock Resolve-Path { return $null }
+        Get-PodeRelativePath -Path './path' -Resolve | Should Be ([string]::Empty)
+    }
+
+    It 'Returns path for a relative path when resolving' {
+        Mock Test-PodePathIsRelative { return $true }
+        Mock Resolve-Path { return @{ 'Path' = 'c:/path' } }
+        Get-PodeRelativePath -Path './path' -Resolve | Should Be 'c:/path'
+    }
+
+    It 'Returns path for a relative path joined to default root' {
+        Mock Test-PodePathIsRelative { return $true }
+        Mock Join-Path { return 'c:/path' }
+        Get-PodeRelativePath -Path './path' -JoinRoot | Should Be 'c:/path'
+    }
+
+    It 'Returns resolved path for a relative path joined to default root when resolving' {
+        Mock Test-PodePathIsRelative { return $true }
+        Mock Join-Path { return 'c:/path' }
+        Mock Resolve-Path { return @{ 'Path' = 'c:/path' } }
+        Get-PodeRelativePath -Path './path' -JoinRoot -Resolve | Should Be 'c:/path'
+    }
+
+    It 'Returns path for a relative path joined to passed root' {
+        Mock Test-PodePathIsRelative { return $true }
+        Mock Join-Path { return 'e:/path' }
+        Get-PodeRelativePath -Path './path' -JoinRoot -RootPath 'e:/' | Should Be 'e:/path'
+    }
+
+    It 'Throws error for path ot existing' {
+        Mock Test-PodePathIsRelative { return $false }
+        Mock Test-PodePath { return $false }
+        { Get-PodeRelativePath -Path './path' -TestPath } | Should Throw 'The path does not exist'
+    }
+}
+
+Describe 'Get-PodeWildcardFiles' {
+    Mock Get-PodeRelativePath { return $Path }
+    Mock Get-ChildItem {
+        $ext = [System.IO.Path]::GetExtension($Path)
+        return @(@{ 'FullName' = "./file1$($ext)" })
+    }
+
+    It 'Get files after adding a wildcard to a directory' {
+        $result = @(Get-PodeWildcardFiles -Path './path' -Wildcard '*.ps1')
+        $result.Length | Should Be 1
+        $result[0] | Should Be './file1.ps1'
+    }
+
+    It 'Get files for wildcard path' {
+        $result = @(Get-PodeWildcardFiles -Path './path/*.png')
+        $result.Length | Should Be 1
+        $result[0] | Should Be './file1.png'
+    }
+
+    It 'Returns null for non-wildcard path' {
+        Get-PodeWildcardFiles -Path './some/path/file.txt' | Should Be $null
     }
 }

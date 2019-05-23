@@ -12,7 +12,7 @@ function ConvertFrom-PodeFile
     )
 
     # if we have data, then setup the data param
-    if (!(Test-Empty $Data)) {
+    if ($null -ne $Data -and $Data.Count -gt 0) {
         $Content = "param(`$data)`nreturn `"$($Content -replace '"', '``"')`""
     }
     else {
@@ -35,7 +35,7 @@ function Get-PodeViewEngineType
     $engine = $PodeContext.Server.ViewEngine.Engine
 
     $ext = Get-PodeFileExtension -Path $Path -TrimPeriod
-    if (!(Test-Empty $ext) -and ($ext -ine $PodeContext.Server.ViewEngine.Extension)) {
+    if (![string]::IsNullOrWhiteSpace($ext) -and ($ext -ine $PodeContext.Server.ViewEngine.Extension)) {
         $engine = $ext
     }
 
@@ -76,7 +76,7 @@ function Get-PodeFileContentUsingViewEngine
 
         default {
             if ($null -ne $PodeContext.Server.ViewEngine.Script) {
-                if (Test-Empty $Data) {
+                if ($null -eq $Data -or $Data.Count -eq 0) {
                     $content = (Invoke-ScriptBlock -ScriptBlock $PodeContext.Server.ViewEngine.Script -Arguments $Path -Return)
                 }
                 else {
@@ -125,32 +125,29 @@ function Test-Empty
         $Value
     )
 
-    $type = Get-PodeType $Value
-    if ($null -eq $type) {
+    if ($null -eq $Value) {
         return $true
     }
 
-    switch ($type.Name) {
-        'string' {
+    switch ($Value) {
+        { $_ -is 'string' } {
             return [string]::IsNullOrWhiteSpace($Value)
         }
 
-        'hashtable' {
+        { $_ -is 'array' } {
+            return ($Value.Length -eq 0)
+        }
+
+        { $_ -is 'hashtable' } {
             return ($Value.Count -eq 0)
         }
 
-        'scriptblock' {
+        { $_ -is 'scriptblock' } {
             return ($null -eq $Value -or [string]::IsNullOrWhiteSpace($Value.ToString()))
         }
-    }
 
-    switch ($type.BaseName) {
-        'valuetype' {
+        { $_ -is 'valuetype' } {
             return $false
-        }
-
-        'array' {
-            return ((Get-PodeCount $Value) -eq 0)
         }
     }
 
@@ -187,7 +184,7 @@ function Test-IsAdminUser
 
     try {
         $principal = New-Object System.Security.Principal.WindowsPrincipal([System.Security.Principal.WindowsIdentity]::GetCurrent())
-        if ($principal -eq $null) {
+        if ($null -eq $principal) {
             return $false
         }
 
@@ -383,7 +380,7 @@ function Get-PodeEndpointInfo
 
     # grab the ip address/hostname
     $_host = $Matches['host']
-    if (Test-Empty $_host) {
+    if ([string]::IsNullOrWhiteSpace($_host)) {
         $_host = '*'
     }
 
@@ -394,7 +391,7 @@ function Get-PodeEndpointInfo
 
     # grab the port
     $_port = $Matches['port']
-    if (Test-Empty $_port) {
+    if ([string]::IsNullOrWhiteSpace($_port)) {
         $_port = 0
     }
 
@@ -421,7 +418,7 @@ function Test-PodeIPAddress
         $IPOnly
     )
 
-    if ((Test-Empty $IP) -or ($IP -ieq '*') -or ($IP -ieq 'all')) {
+    if ([string]::IsNullOrWhiteSpace($IP) -or ($IP -ieq '*') -or ($IP -ieq 'all')) {
         return $true
     }
 
@@ -480,15 +477,23 @@ function Get-PodeIPAddressesForHostname
     switch ($Type.ToLowerInvariant())
     {
         'ipv4' {
-            $ips = @(($ips | Where-Object { $_.AddressFamily -ieq 'InterNetwork' }))
+            $ips = @(foreach ($ip in $ips) {
+                if ($ip.AddressFamily -ieq 'InterNetwork') {
+                    $ip
+                }
+            })
         }
 
         'ipv6' {
-            $ips = @(($ips | Where-Object { $_.AddressFamily -ieq 'InterNetworkV6' }))
+            $ips = @(foreach ($ip in $ips) {
+                if ($ip.AddressFamily -ieq 'InterNetworkV6') {
+                    $ip
+                }
+            })
         }
     }
 
-    return @(($ips | Select-Object -ExpandProperty IPAddressToString))
+    return (@($ips)).IPAddressToString
 }
 
 function Test-PodeIPAddressLocal
@@ -532,7 +537,7 @@ function Get-PodeIPAddress
         $IP
     )
 
-    if ((Test-Empty $IP) -or ($IP -ieq '*') -or ($IP -ieq 'all')) {
+    if ([string]::IsNullOrWhiteSpace($IP) -or ($IP -ieq '*') -or ($IP -ieq 'all')) {
         return [System.Net.IPAddress]::Any
     }
 
@@ -566,9 +571,10 @@ function Test-PodeIPAddressInRange
 
     $valid = $true
 
-    0..3 | ForEach-Object {
-        if ($valid -and (($IP.Bytes[$_] -lt $LowerIP.Bytes[$_]) -or ($IP.Bytes[$_] -gt $UpperIP.Bytes[$_]))) {
+    foreach ($i in 0..3) {
+        if (($IP.Bytes[$i] -lt $LowerIP.Bytes[$i]) -or ($IP.Bytes[$i] -gt $UpperIP.Bytes[$i])) {
             $valid = $false
+            break
         }
     }
 
@@ -623,18 +629,24 @@ function Get-PodeSubnetRange
     }
 
     # covert netmask to bytes
-    0..3 | ForEach-Object {
-        $network[$_] = [Convert]::ToByte($network[$_], 2)
+    foreach ($i in 0..3) {
+        $network[$i] = [Convert]::ToByte($network[$i], 2)
     }
 
     # calculate the bottom range
-    $bottom = @(0..3 | ForEach-Object { [byte]([byte]$network[$_] -band [byte]$ip_parts[$_]) })
+    $bottom = @(foreach ($i in 0..3) {
+        [byte]([byte]$network[$i] -band [byte]$ip_parts[$i])
+    })
 
     # calculate the range
-    $range = @(0..3 | ForEach-Object { 256 + (-bnot [byte]$network[$_]) })
+    $range = @(foreach ($i in 0..3) {
+        256 + (-bnot [byte]$network[$i])
+    })
 
     # calculate the top range
-    $top = @(0..3 | ForEach-Object { [byte]([byte]$ip_parts[$_] + [byte]$range[$_]) })
+    $top = @(foreach ($i in 0..3) {
+        [byte]([byte]$ip_parts[$i] + [byte]$range[$i])
+    })
 
     return @{
         'Lower' = ($bottom -join '.');
@@ -996,7 +1008,7 @@ function Join-PodeServerRoot
     )
 
     # use the root path of the server
-    if (Test-Empty $Root) {
+    if ([string]::IsNullOrWhiteSpace($Root)) {
         $Root = $PodeContext.Server.Root
     }
 
@@ -1027,10 +1039,10 @@ function Join-PodePaths
     )
 
     # remove any empty/null paths
-    $Paths = Remove-PodeEmptyItemsFromArray $Paths
+    $Paths = @(Remove-PodeEmptyItemsFromArray $Paths)
 
     # if there are no paths, return blank
-    if (Test-Empty $Paths) {
+    if ($null -eq $Paths -or $Paths.Length -eq 0) {
         return ([string]::Empty)
     }
 
@@ -1044,8 +1056,8 @@ function Join-PodePaths
 
     # if there are any more, add them on
     if ($Paths.Length -gt 2) {
-        $Paths[2..($Paths.Length - 1)] | ForEach-Object {
-            $_path = Join-Path $_path $_
+        foreach ($p in $Paths[2..($Paths.Length - 1)]) {
+            $_path = Join-Path $_path $p
         }
     }
 
@@ -1219,18 +1231,28 @@ function Test-PodeValidNetworkFailure
         '*broken pipe*'
     )
 
-    return (($msgs | Where-Object { $Exception.Message -ilike $_ } | Measure-Object).Count -gt 0)
+    $match = @(foreach ($msg in $msgs) {
+        if ($Exception.Message -ilike $msg) {
+            $msg
+        }
+    })[0]
+
+    return ($null -ne $match)
 }
 
 function ConvertFrom-PodeRequestContent
 {
     param (
         [Parameter()]
-        $Request
+        $Request,
+
+        [Parameter()]
+        [string]
+        $ContentType
     )
 
     # get the requests content type and boundary
-    $MetaData = Get-PodeContentTypeAndBoundary -ContentType $Request.ContentType
+    $MetaData = Get-PodeContentTypeAndBoundary -ContentType $ContentType
     $Encoding = $Request.ContentEncoding
 
     # result object for data/files
@@ -1240,7 +1262,7 @@ function ConvertFrom-PodeRequestContent
     }
 
     # if there is no content-type then do nothing
-    if (Test-Empty $MetaData.ContentType) {
+    if ([string]::IsNullOrWhiteSpace($MetaData.ContentType)) {
         return $Result
     }
 
@@ -1249,7 +1271,7 @@ function ConvertFrom-PodeRequestContent
         $Content = Read-PodeStreamToEnd -Stream $Request.InputStream -Encoding $Encoding
 
         # if there is no content then do nothing
-        if (Test-Empty $Content) {
+        if ([string]::IsNullOrWhiteSpace($Content)) {
             return $Result
         }
     }
@@ -1257,7 +1279,12 @@ function ConvertFrom-PodeRequestContent
     # run action for the content type
     switch ($MetaData.ContentType) {
         { $_ -ilike '*/json' } {
-            $Result.Data = ($Content | ConvertFrom-Json)
+            if (Test-IsPSCore) {
+                $Result.Data = ($Content | ConvertFrom-Json -AsHashtable)
+            }
+            else {
+                $Result.Data = ($Content | ConvertFrom-Json)
+            }
         }
 
         { $_ -ilike '*/xml' } {
@@ -1295,10 +1322,10 @@ function ConvertFrom-PodeRequestContent
                 $fields = @{}
                 $disp = ConvertFrom-PodeBytesToString -Bytes $Lines[$bIndex+1] -Encoding $Encoding -RemoveNewLine
 
-                @($disp -isplit ';') | ForEach-Object {
-                    $atoms = @($_ -isplit '=')
+                foreach ($line in @($disp -isplit ';')) {
+                    $atoms = @($line -isplit '=')
                     if ($atoms.Length -eq 2) {
-                        $fields.Add($atoms[0].Trim(), $atoms[1].Trim(' "'))
+                        $fields[$atoms[0].Trim()] = $atoms[1].Trim(' "')
                     }
                 }
 
@@ -1312,7 +1339,7 @@ function ConvertFrom-PodeRequestContent
                 if ($fields.ContainsKey('filename')) {
                     $Result.Data.Add($fields.name, $fields.filename)
 
-                    if (!(Test-Empty $fields.filename)) {
+                    if (![string]::IsNullOrWhiteSpace($fields.filename)) {
                         $type = ConvertFrom-PodeBytesToString -Bytes $Lines[$bIndex+2] -Encoding $Encoding -RemoveNewLine
 
                         $Result.Files.Add($fields.filename, @{
@@ -1321,8 +1348,8 @@ function ConvertFrom-PodeRequestContent
                         })
 
                         $bytes = @()
-                        $Lines[($bIndex+4)..($boundaryIndexes[$i+1]-1)] | ForEach-Object {
-                            $bytes += $_
+                        foreach ($b in ($Lines[($bIndex+4)..($boundaryIndexes[$i+1]-1)])) {
+                            $bytes += $b
                         }
 
                         $Result.Files[$fields.filename].Bytes = (Remove-PodeNewLineBytesFromArray $bytes $Encoding)
@@ -1355,7 +1382,7 @@ function Get-PodeContentTypeAndBoundary
         }
     }
 
-    if (Test-Empty $ContentType) {
+    if ([string]::IsNullOrWhiteSpace($ContentType)) {
         return $obj
     }
 
@@ -1382,8 +1409,8 @@ function ConvertFrom-PodeNameValueToHashTable
     }
 
     $ht = @{}
-    $Collection.Keys | ForEach-Object {
-        $ht[$_] = $Collection[$_]
+    foreach ($key in $Collection.Keys) {
+        $ht[$key] = $Collection[$key]
     }
 
     return $ht
@@ -1440,7 +1467,7 @@ function Test-PodePath
     )
 
     # if the file doesnt exist then fail on 404
-    if ((Test-Empty $Path) -or !(Test-Path $Path)) {
+    if ([string]::IsNullOrWhiteSpace($Path) -or !(Test-Path $Path)) {
         if (!$NoStatus) {
             status 404
         }
@@ -1474,14 +1501,36 @@ function Test-PodePathIsFile
     param (
         [Parameter()]
         [string]
-        $Path
+        $Path,
+
+        [switch]
+        $FailOnWildcard
     )
 
-    if (Test-Empty $Path) {
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        return $false
+    }
+
+    if ($FailOnWildcard -and (Test-PodePathIsWildcard $Path)) {
         return $false
     }
 
     return (![string]::IsNullOrWhiteSpace([System.IO.Path]::GetExtension($Path)))
+}
+
+function Test-PodePathIsWildcard
+{
+    param (
+        [Parameter()]
+        [string]
+        $Path
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        return $false
+    }
+
+    return $Path.Contains('*')
 }
 
 function Test-PodePathIsDirectory
@@ -1490,8 +1539,15 @@ function Test-PodePathIsDirectory
         [Parameter(Mandatory=$true)]
         [ValidateNotNullOrEmpty()]
         [string]
-        $Path
+        $Path,
+
+        [switch]
+        $FailOnWildcard
     )
+
+    if ($FailOnWildcard -and (Test-PodePathIsWildcard $Path)) {
+        return $false
+    }
 
     return ([string]::IsNullOrWhiteSpace([System.IO.Path]::GetExtension($Path)))
 }
@@ -1504,7 +1560,7 @@ function Convert-PodePathSeparators
     )
 
     return @($Paths | ForEach-Object {
-        if (!(Test-Empty $_)) {
+        if (![string]::IsNullOrWhiteSpace($_)) {
             $_ -ireplace '[\\/]', [System.IO.Path]::DirectorySeparatorChar
         }
     })
@@ -1515,12 +1571,31 @@ function Convert-PodePathPatternToRegex
     param (
         [Parameter()]
         [string]
-        $Path
+        $Path,
+
+        [switch]
+        $NotSlashes,
+
+        [switch]
+        $NotStrict
     )
 
     $Path = $Path -ireplace '\.', '\.'
-    $Path = $Path -ireplace '[\\/]', '[\\/]'
+
+    if (!$NotSlashes) {
+        if ($Path -match '[\\/]\*$') {
+            $Path = $Path -replace '[\\/]\*$', '/{0,1}*'
+        }
+
+        $Path = $Path -ireplace '[\\/]', '[\\/]'
+    }
+
     $Path = $Path -ireplace '\*', '.*?'
+
+    if ($NotStrict) {
+        return $Path
+    }
+
     return "^$($Path)$"
 }
 
@@ -1532,7 +1607,10 @@ function Convert-PodePathPatternsToRegex
         $Paths,
 
         [switch]
-        $NotSlashes
+        $NotSlashes,
+
+        [switch]
+        $NotStrict
     )
 
     # remove any empty entries
@@ -1548,22 +1626,18 @@ function Convert-PodePathPatternsToRegex
     # replace certain chars
     $Paths = @($Paths | ForEach-Object {
         if (!(Test-Empty $_)) {
-            $tmp = $_ -ireplace '\.', '\.'
-
-            if (!$NotSlashes) {
-                if ($tmp -match '[\\/]\*$') {
-                    $tmp = $tmp -replace '[\\/]\*$', '/{0,1}*'
-                }
-
-                $tmp = $tmp -ireplace '[\\/]', '[\\/]'
-            }
-
-            $tmp -ireplace '\*', '.*?'
+            Convert-PodePathPatternToRegex -Path $_ -NotStrict -NotSlashes:$NotSlashes
         }
     })
 
     # join them all together
-    return "^($($Paths -join '|'))$"
+    $joined = "($($Paths -join '|'))"
+
+    if ($NotStrict) {
+        return "$($joined)"
+    }
+
+    return "^$($joined)$"
 }
 
 function Get-PodeModulePath
@@ -1571,7 +1645,7 @@ function Get-PodeModulePath
     # if there's 1 module imported already, use that
     $importedModule = @(Get-Module -Name Pode)
     if (($importedModule | Measure-Object).Count -eq 1) {
-        return ($importedModule | Select-Object -First 1).Path
+        return (@($importedModule)[0]).Path
     }
 
     # if there's none or more, attempt to get the module used for 'engine'
@@ -1585,16 +1659,348 @@ function Get-PodeModulePath
 
     # if there were multiple to begin with, use the newest version
     if (($importedModule | Measure-Object).Count -gt 1) {
-        return ($importedModule | Sort-Object -Property Version | Select-Object -Last 1).Path
+        return (@($importedModule | Sort-Object -Property Version)[-1]).Path
     }
 
     # otherwise there were none, use the latest installed
-    return (Get-Module -ListAvailable -Name Pode |
-        Sort-Object -Property Version |
-        Select-Object -Last 1).Path
+    return (@(Get-Module -ListAvailable -Name Pode | Sort-Object -Property Version)[-1]).Path
 }
 
 function Get-PodeModuleRootPath
 {
     return (Split-Path -Parent -Path $PodeContext.Server.PodeModulePath)
+}
+
+function Get-PodeUrl
+{
+    return "$($WebEvent.Protocol)://$($WebEvent.Endpoint)$($WebEvent.Path)"
+}
+
+function Find-PodeErrorPage
+{
+    param (
+        [Parameter()]
+        [int]
+        $Code,
+
+        [Parameter()]
+        [string]
+        $ContentType
+    )
+
+    # if a defined content type is supplied, attempt to find an error page for that first
+    if (![string]::IsNullOrWhiteSpace($ContentType)) {
+        $path = Get-PodeErrorPage -Code $Code -ContentType $ContentType
+        if (![string]::IsNullOrWhiteSpace($path)) {
+            return @{ 'Path' = $path; 'ContentType' = $ContentType }
+        }
+    }
+
+    # if a defined route error page content type is supplied, attempt to find an error page for that
+    if (![string]::IsNullOrWhiteSpace($WebEvent.ErrorType)) {
+        $path = Get-PodeErrorPage -Code $Code -ContentType $WebEvent.ErrorType
+        if (![string]::IsNullOrWhiteSpace($path)) {
+            return @{ 'Path' = $path; 'ContentType' = $WebEvent.ErrorType }
+        }
+    }
+
+    # if route patterns have been defined, see if an error content type matches and attempt that
+    if (!(Test-Empty $PodeContext.Server.Web.ErrorPages.Routes)) {
+        # find type by pattern
+        $matched = @(foreach ($key in $PodeContext.Server.Web.ErrorPages.Routes.Keys) {
+            if ($WebEvent.Path -imatch $key) {
+                $key
+            }
+        })[0]
+
+        # if we have a match, see if a page exists
+        if (!(Test-Empty $matched)) {
+            $type = $PodeContext.Server.Web.ErrorPages.Routes[$matched]
+            $path = Get-PodeErrorPage -Code $Code -ContentType $type
+            if (![string]::IsNullOrWhiteSpace($path)) {
+                return @{ 'Path' = $path; 'ContentType' = $type }
+            }
+        }
+    }
+
+    # if we're using strict typing, attempt that, if we have a content type
+    if ($PodeContext.Server.Web.ErrorPages.StrictContentTyping -and ![string]::IsNullOrWhiteSpace($WebEvent.ContentType)) {
+        $path = Get-PodeErrorPage -Code $Code -ContentType $WebEvent.ContentType
+        if (![string]::IsNullOrWhiteSpace($path)) {
+            return @{ 'Path' = $path; 'ContentType' = $WebEvent.ContentType }
+        }
+    }
+
+    # if we have a default defined, attempt that
+    if (!(Test-Empty $PodeContext.Server.Web.ErrorPages.Default)) {
+        $path = Get-PodeErrorPage -Code $Code -ContentType $PodeContext.Server.Web.ErrorPages.Default
+        if (![string]::IsNullOrWhiteSpace($path)) {
+            return @{ 'Path' = $path; 'ContentType' = $PodeContext.Server.Web.ErrorPages.Default }
+        }
+    }
+
+    # if there's still no error page, use default HTML logic
+    $type = Get-PodeContentType -Extension 'html'
+    $path = (Get-PodeErrorPage -Code $Code -ContentType $type)
+
+    if (![string]::IsNullOrWhiteSpace($path)) {
+        return @{ 'Path' = $path; 'ContentType' = $type }
+    }
+
+    return $null
+}
+
+function Get-PodeErrorPage
+{
+    param (
+        [Parameter()]
+        [int]
+        $Code,
+
+        [Parameter()]
+        [string]
+        $ContentType
+    )
+
+    # parse the passed content type
+    $ContentType = (Get-PodeContentTypeAndBoundary -ContentType $ContentType).ContentType
+
+    # object for the page path
+    $path = $null
+
+    # attempt to find a custom error page
+    $path = Find-PodeCustomErrorPage -Code $Code -ContentType $ContentType
+
+    # if there's no custom page found, attempt to find an inbuilt page
+    if ([string]::IsNullOrWhiteSpace($path)) {
+        $podeRoot = Join-Path (Get-PodeModuleRootPath) 'Misc'
+        $path = Find-PodeFileForContentType -Path $podeRoot -Name 'default-error-page' -ContentType $ContentType -Engine 'pode'
+    }
+
+    # if there's no path found, or it's inaccessible, return null
+    if (!(Test-PodePath $path -NoStatus)) {
+        return $null
+    }
+
+    return $path
+}
+
+function Find-PodeCustomErrorPage
+{
+    param (
+        [Parameter()]
+        [int]
+        $Code,
+
+        [Parameter()]
+        [string]
+        $ContentType
+    )
+
+    # get the custom errors path
+    $customErrPath = $PodeContext.Server.InbuiltDrives['errors']
+
+    # if there's no custom error path, return
+    if ([string]::IsNullOrWhiteSpace($customErrPath)) {
+        return $null
+    }
+
+    # retrieve a status code page
+    $path = (Find-PodeFileForContentType -Path $customErrPath -Name "$($Code)" -ContentType $ContentType)
+    if (![string]::IsNullOrWhiteSpace($path)) {
+        return $path
+    }
+
+    # retrieve default page
+    $path = (Find-PodeFileForContentType -Path $customErrPath -Name 'default' -ContentType $ContentType)
+    if (![string]::IsNullOrWhiteSpace($path)) {
+        return $path
+    }
+
+    # no file was found
+    return $null
+}
+
+function Find-PodeFileForContentType
+{
+    param (
+        [Parameter()]
+        [string]
+        $Path,
+
+        [Parameter()]
+        [string]
+        $Name,
+
+        [Parameter()]
+        [string]
+        $ContentType,
+
+        [Parameter()]
+        [string]
+        $Engine = $null
+    )
+
+    # get all files at the path that start with the name
+    $files = @(Get-ChildItem -Path (Join-Path $Path "$($Name).*"))
+
+    # if there are no files, return
+    if ($null -eq $files -or $files.Length -eq 0) {
+        return $null
+    }
+
+    # filter the files by the view engine extension (but only if the current engine is dynamic - non-html)
+    if ([string]::IsNullOrWhiteSpace($Engine) -and $PodeContext.Server.ViewEngine.IsDynamic) {
+        $Engine = $PodeContext.Server.ViewEngine.Extension
+    }
+
+    $Engine = (coalesce $Engine 'pode')
+    if ($Engine -ine 'pode') {
+        $Engine = "($($Engine)|pode)"
+    }
+
+    $engineFiles = @(foreach ($file in $files) {
+        if ($file.Name -imatch "\.$($Engine)$") {
+            $file
+        }
+    })
+
+    $files = @(foreach ($file in $files) {
+        if ($file.Name -inotmatch "\.$($Engine)$") {
+            $file
+        }
+    })
+
+    # only attempt static files if we still have files after any engine filtering
+    if ($null -ne $files -and $files.Length -gt 0)
+    {
+        # get files of the format '<name>.<type>'
+        $file = @(foreach ($f in $files) {
+            if ($f.Name -imatch "^$($Name)\.(?<ext>.*?)$") {
+                if (($ContentType -ieq (Get-PodeContentType -Extension $Matches['ext']))) {
+                    $f.FullName
+                }
+            }
+        })[0]
+
+        if (![string]::IsNullOrWhiteSpace($file)) {
+            return $file
+        }
+    }
+
+    # only attempt these formats if we have a files for the view engine
+    if ($null -ne $engineFiles -and $engineFiles.Length -gt 0)
+    {
+        # get files of the format '<name>.<type>.<engine>'
+        $file = @(foreach ($f in $engineFiles) {
+            if ($f.Name -imatch "^$($Name)\.(?<ext>.*?)\.$($engine)$") {
+                if ($ContentType -ieq (Get-PodeContentType -Extension $Matches['ext'])) {
+                    $f.FullName
+                }
+            }
+        })[0]
+
+        if (![string]::IsNullOrWhiteSpace($file)) {
+            return $file
+        }
+
+        # get files of the format '<name>.<engine>'
+        $file = @(foreach ($f in $engineFiles) {
+            if ($f.Name -imatch "^$($Name)\.$($engine)$") {
+                $f.FullName
+            }
+        })[0]
+
+        if (![string]::IsNullOrWhiteSpace($file)) {
+            return $file
+        }
+    }
+
+    # no file was found
+    return $null
+}
+
+function Test-PodePathIsRelative
+{
+    param (
+        [Parameter(Mandatory=$true)]
+        [string]
+        $Path
+    )
+
+    if (@('.', '..') -contains $Path) {
+        return $true
+    }
+
+    return ($Path -match '^\.{1,2}[\\/]')
+}
+
+function Get-PodeRelativePath
+{
+    param (
+        [Parameter(Mandatory=$true)]
+        [string]
+        $Path,
+
+        [Parameter()]
+        [string]
+        $RootPath,
+
+        [switch]
+        $JoinRoot,
+
+        [switch]
+        $Resolve,
+
+        [switch]
+        $TestPath
+    )
+
+    # if the path is relative, join to root if flagged
+    if ($JoinRoot -and (Test-PodePathIsRelative -Path $Path)) {
+        if ([string]::IsNullOrWhiteSpace($RootPath)) {
+            $RootPath = $PodeContext.Server.Root
+        }
+
+        $Path = Join-Path $RootPath $Path
+    }
+
+    # if flagged, resolve the path
+    if ($Resolve) {
+        $_rawPath = $Path
+        $Path = (Resolve-Path -Path $Path -ErrorAction Ignore).Path
+    }
+
+    # if flagged, test the path and throw error if it doesn't exist
+    if ($TestPath -and !(Test-PodePath $Path -NoStatus)) {
+        throw "The path does not exist: $(coalesce $Path $_rawPath)"
+    }
+
+    return $Path
+}
+
+function Get-PodeWildcardFiles
+{
+    param (
+        [Parameter(Mandatory=$true)]
+        [string]
+        $Path,
+
+        [Parameter()]
+        [string]
+        $Wildcard = '*.*'
+    )
+
+    # if the OriginalPath is a directory, add wildcard
+    if (Test-PodePathIsDirectory -Path $Path) {
+        $Path = (Join-Path $Path $Wildcard)
+    }
+
+    # if path has a *, assume wildcard
+    if (Test-PodePathIsWildcard -Path $Path) {
+        $Path = Get-PodeRelativePath -Path $Path -JoinRoot
+        return @((Get-ChildItem $Path -Recurse -Force).FullName)
+    }
+
+    return $null
 }

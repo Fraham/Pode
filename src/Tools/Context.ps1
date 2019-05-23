@@ -54,13 +54,18 @@ function New-PodeContext
 
     # set the server name, logic and root
     $ctx.Server.Name = $Name
-    $ctx.Server.Root = $ServerRoot
     $ctx.Server.Logic = $ScriptBlock
     $ctx.Server.Interval = $Interval
     $ctx.Server.PodeModulePath = (Get-PodeModulePath)
 
     # check if there is any global configuration
     $ctx.Server.Configuration = Open-PodeConfiguration -ServerRoot $ServerRoot -Context $ctx
+
+    # configure the server's root path
+    $ctx.Server.Root = $ServerRoot
+    if (!(Test-Empty $ctx.Server.Configuration.server.root)) {
+        $ctx.Server.Root = Get-PodeRelativePath -Path $ctx.Server.Configuration.server.root -RootPath $ctx.Server.Root -JoinRoot -Resolve -TestPath
+    }
 
     # setup file monitoring details (code has priority over config)
     if (!(Test-Empty $ctx.Server.Configuration)) {
@@ -114,6 +119,7 @@ function New-PodeContext
         'Engine' = 'html';
         'Extension' = 'html';
         'Script' = $null;
+        'IsDynamic' = $false;
     }
 
     # routes for pages and api
@@ -211,8 +217,8 @@ function New-PodeRunspaceState
         (New-Object System.Management.Automation.Runspaces.SessionStateVariableEntry -ArgumentList 'Console', $Host, $null)
     )
 
-    $variables | ForEach-Object {
-        $state.Variables.Add($_)
+    foreach ($var in $variables) {
+        $state.Variables.Add($var)
     }
 
     $PodeContext.RunspaceState = $state
@@ -317,6 +323,7 @@ function Set-PodeWebConfiguration
         $Context
     )
 
+    # setup the main web config
     $Context.Server.Web = @{
         'Static' = @{
             'Defaults' = $Configuration.web.static.defaults;
@@ -326,6 +333,36 @@ function Set-PodeWebConfiguration
                 'Include' = (Convert-PodePathPatternsToRegex -Paths @($Configuration.web.static.cache.include) -NotSlashes);
                 'Exclude' = (Convert-PodePathPatternsToRegex -Paths @($Configuration.web.static.cache.exclude) -NotSlashes);
             }
+        };
+        'ErrorPages' = @{
+            'ShowExceptions' = [bool]$Configuration.web.errorPages.showExceptions;
+            'StrictContentTyping' = [bool]$Configuration.web.errorPages.strictContentTyping;
+            'Default' = $Configuration.web.errorPages.default;
+            'Routes' = @{};
+        };
+        'ContentType' = @{
+            'Default' = $Configuration.web.contentType.default;
+            'Routes' = @{};
+        };
+    }
+
+    # setup content type route patterns for forced content types
+    if ($null -ne $Configuration.web.contentType.routes) {
+        $Configuration.web.contentType.routes.psobject.properties.name | ForEach-Object {
+            $_pattern = $_
+            $_type = $Configuration.web.contentType.routes.$_pattern
+            $_pattern = (Convert-PodePathPatternToRegex -Path $_pattern -NotSlashes)
+            $Context.Server.Web.ContentType.Routes[$_pattern] = $_type
+        }
+    }
+
+    # setup content type route patterns for error pages
+    if ($null -ne $Configuration.web.errorPages.routes) {
+        $Configuration.web.errorPages.routes.psobject.properties.name | ForEach-Object {
+            $_pattern = $_
+            $_type = $Configuration.web.errorPages.routes.$_pattern
+            $_pattern = (Convert-PodePathPatternToRegex -Path $_pattern -NotSlashes)
+            $Context.Server.Web.ErrorPages.Routes[$_pattern] = $_type
         }
     }
 }
@@ -539,16 +576,10 @@ function Import
     else
     {
         # if path is '.', replace with server root
-        if ($Path -match '^\.[\\/]{0,1}') {
-            $Path = $Path -replace '^\.[\\/]{0,1}', ''
-            $Path = Join-Path $PodeContext.Server.Root $Path
-        }
-
-        # check to see if a raw path to a module was supplied
-        $_path = Resolve-Path -Path $Path -ErrorAction Ignore
+        $_path = Get-PodeRelativePath -Path $Path -JoinRoot -Resolve
 
         # if the resolved path is empty, then it's a module name that was supplied
-        if ([string]::IsNullOrWhiteSpace($_path)) {
+        if (Test-Empty $_path) {
             # check to see if module is in ps_modules
             $_psModulePath = Join-PodeServerRoot -Folder (Join-PodePaths @('ps_modules', $Path))
             if (Test-Path $_psModulePath) {
@@ -561,14 +592,26 @@ function Import
             }
         }
 
+        # else, we have a path, if it's a directory/wildcard then loop over all files
+        else {
+            $_paths = Get-PodeWildcardFiles -Path $Path -Wildcard '*.ps*1'
+            if (!(Test-Empty $_paths)) {
+                foreach ($_path in $_paths) {
+                    import -Path $_path -Now:$Now
+                }
+
+                return
+            }
+        }
+
         # if it's still empty, error
-        if ([string]::IsNullOrWhiteSpace($_path)) {
+        if (Test-Empty $_path) {
             throw "Failed to import module: $($Path)"
         }
 
         # check if the path exists
         if (!(Test-PodePath $_path -NoStatus)) {
-            throw "The module path does not exist: $($_path)"
+            throw "The module path does not exist: $(coalesce $_path $Path)"
         }
 
         # import the module into the runspace state
@@ -592,17 +635,23 @@ function Load
     )
 
     # if path is '.', replace with server root
-    if ($Path -match '^\.[\\/]{0,1}') {
-        $Path = $Path -replace '^\.[\\/]{0,1}', ''
-        $Path = Join-Path $PodeContext.Server.Root $Path
-    }
+    $_path = Get-PodeRelativePath -Path $Path -JoinRoot -Resolve
 
-    # check to see if a raw path to a script was supplied
-    $_path = Resolve-Path -Path $Path -ErrorAction Ignore
+    # we have a path, if it's a directory/wildcard then loop over all files
+    if (!(Test-Empty $_path)) {
+        $_paths = Get-PodeWildcardFiles -Path $Path -Wildcard '*.ps1'
+        if (!(Test-Empty $_paths)) {
+            foreach ($_path in $_paths) {
+                load -Path $_path
+            }
+
+            return
+        }
+    }
 
     # check if the path exists
     if (!(Test-PodePath $_path -NoStatus)) {
-        throw "The script path does not exist: $($_path)"
+        throw "The script path does not exist: $(coalesce $_path $Path)"
     }
 
     # dot-source the script
