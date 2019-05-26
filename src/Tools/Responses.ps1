@@ -357,7 +357,7 @@ function Json
     elseif (Test-Empty $Value) {
         $Value = '{}'
     }
-    elseif ((Get-PodeType $Value).Name -ine 'string') {
+    elseif ($Value -isnot 'string') {
         $Value = ($Value | ConvertTo-Json -Depth 10 -Compress)
     }
 
@@ -495,29 +495,18 @@ function Markdown
         $Value = [string]::Empty
     }
 
-    $mimeType = 'text/markdown; charset=utf-8'
+    $mimeType = 'text/markdown'
 
     # convert to html, if specified
     if ($AsHtml) {
-        # if non-string value, convert to HTML, and write as HTML
-        if ((Get-PodeType $Value).Name -ine 'string') {
-            $mimeType = 'text/html; charset=utf-8'
-            $Value = ($Value | ConvertTo-Html)
-        }
-
-        # if ps-core, convert from markdown and write as HTML
-        elseif (Test-IsPSCore) {
-            $mimeType = 'text/html; charset=utf-8'
+        if (Test-IsPSCore) {
+            $mimeType = 'text/html'
             $Value = ($Value | ConvertFrom-Markdown).Html
         }
     }
 
     # render the content
-    if ((Get-PodeType $Value).Name -ine 'string') {
-        return
-    }
-
-    Write-PodeValueToResponse -Value $Value -ContentType $mimeType
+    Text -Value $Value -ContentType $mimeType
 }
 
 # include helper to import the content of a view into another view
