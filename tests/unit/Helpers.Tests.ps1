@@ -61,62 +61,62 @@ Describe 'Get-PodeType' {
     }
 }
 
-Describe 'Test-IsEmpty' {
+Describe 'Test-PodeIsEmpty' {
     Context 'No value is passed' {
         It 'Return true for no value' {
-            Test-IsEmpty | Should be $true
+            Test-PodeIsEmpty | Should be $true
         }
         
         It 'Return true for null value' {
-            Test-IsEmpty -Value $null | Should be $true
+            Test-PodeIsEmpty -Value $null | Should be $true
         }
     }
 
     Context 'Empty value is passed' {
         It 'Return true for an empty arraylist' {
-            Test-IsEmpty -Value ([System.Collections.ArrayList]::new()) | Should Be $true
+            Test-PodeIsEmpty -Value ([System.Collections.ArrayList]::new()) | Should Be $true
         }
 
         It 'Return true for an empty array' {
-            Test-IsEmpty -Value @() | Should Be $true
+            Test-PodeIsEmpty -Value @() | Should Be $true
         }
 
         It 'Return true for an empty hashtable' {
-            Test-IsEmpty -Value @{} | Should Be $true
+            Test-PodeIsEmpty -Value @{} | Should Be $true
         }
 
         It 'Return true for an empty string' {
-            Test-IsEmpty -Value ([string]::Empty) | Should Be $true
+            Test-PodeIsEmpty -Value ([string]::Empty) | Should Be $true
         }
 
         It 'Return true for a whitespace string' {
-            Test-IsEmpty -Value "  " | Should Be $true
+            Test-PodeIsEmpty -Value "  " | Should Be $true
         }
 
         It 'Return true for an empty scriptblock' {
-            Test-IsEmpty -Value {} | Should Be $true
+            Test-PodeIsEmpty -Value {} | Should Be $true
         }
     }
 
     Context 'Valid value is passed' {
         It 'Return false for a string' {
-            Test-IsEmpty -Value "test" | Should Be $false
+            Test-PodeIsEmpty -Value "test" | Should Be $false
         }
 
         It 'Return false for a number' {
-            Test-IsEmpty -Value 1 | Should Be $false
+            Test-PodeIsEmpty -Value 1 | Should Be $false
         }
 
         It 'Return false for an array' {
-            Test-IsEmpty -Value @('test') | Should Be $false
+            Test-PodeIsEmpty -Value @('test') | Should Be $false
         }
 
         It 'Return false for a hashtable' {
-            Test-IsEmpty -Value @{'key'='value';} | Should Be $false
+            Test-PodeIsEmpty -Value @{'key'='value';} | Should Be $false
         }
 
         It 'Return false for a scriptblock' {
-            Test-IsEmpty -Value { write-host '' } | Should Be $false
+            Test-PodeIsEmpty -Value { write-host '' } | Should Be $false
         }
     }
 }
@@ -129,50 +129,50 @@ Describe 'Get-PodePSVersionTable' {
     }
 }
 
-Describe 'Test-IsUnix' {
+Describe 'Test-PodeIsUnix' {
     It 'Returns false for non-unix' {
         Mock Get-PodePSVersionTable { return @{ 'Platform' = 'Windows' } }
-        Test-IsUnix | Should Be $false
+        Test-PodeIsUnix | Should Be $false
         Assert-MockCalled Get-PodePSVersionTable -Times 1
     }
 
     It 'Returns true for unix' {
         Mock Get-PodePSVersionTable { return @{ 'Platform' = 'Unix' } }
-        Test-IsUnix | Should Be $true
+        Test-PodeIsUnix | Should Be $true
         Assert-MockCalled Get-PodePSVersionTable -Times 1
     }
 }
 
-Describe 'Test-IsWindows' {
+Describe 'Test-PodeIsWindows' {
     It 'Returns false for non-windows' {
         Mock Get-PodePSVersionTable { return @{ 'Platform' = 'Unix' } }
-        Test-IsWindows | Should Be $false
+        Test-PodeIsWindows | Should Be $false
         Assert-MockCalled Get-PodePSVersionTable -Times 1
     }
 
     It 'Returns true for windows and desktop' {
         Mock Get-PodePSVersionTable { return @{ 'PSEdition' = 'Desktop' } }
-        Test-IsWindows | Should Be $true
+        Test-PodeIsWindows | Should Be $true
         Assert-MockCalled Get-PodePSVersionTable -Times 1
     }
 
     It 'Returns true for windows and core' {
         Mock Get-PodePSVersionTable { return @{ 'Platform' = 'Win32NT'; 'PSEdition' = 'Core' } }
-        Test-IsWindows | Should Be $true
+        Test-PodeIsWindows | Should Be $true
         Assert-MockCalled Get-PodePSVersionTable -Times 1
     }
 }
 
-Describe 'Test-IsPSCore' {
+Describe 'Test-PodeIsPSCore' {
     It 'Returns false for non-core' {
         Mock Get-PodePSVersionTable { return @{ 'PSEdition' = 'Desktop' } }
-        Test-IsPSCore | Should Be $false
+        Test-PodeIsPSCore | Should Be $false
         Assert-MockCalled Get-PodePSVersionTable -Times 1
     }
 
     It 'Returns true for unix' {
         Mock Get-PodePSVersionTable { return @{ 'PSEdition' = 'Core' } }
-        Test-IsPSCore | Should Be $true
+        Test-PodeIsPSCore | Should Be $true
         Assert-MockCalled Get-PodePSVersionTable -Times 1
     }
 }
@@ -254,14 +254,14 @@ Describe 'Test-PodeIPAddress' {
 Describe 'ConvertTo-PodeIPAddress' {
     Context 'Null values' {
         It 'Throws error for null' {
-            { ConvertTo-PodeIPAddress -Endpoint $null } | Should Throw 'the argument is null'
+            { ConvertTo-PodeIPAddress -Address $null } | Should Throw 'the argument is null'
         }
     }
 
     Context 'Valid parameters' {
         It 'Returns IPAddress from IPEndpoint' {
             $_a = [System.Net.IPAddress]::Parse('127.0.0.1')
-            $addr = ConvertTo-PodeIPAddress -Endpoint ([System.Net.IPEndpoint]::new($_a, 8080))
+            $addr = ConvertTo-PodeIPAddress -Address ([System.Net.IPEndpoint]::new($_a, 8080))
             $addr | Should Not Be $null
             $addr.ToString() | Should Be '127.0.0.1'
         }
@@ -269,7 +269,7 @@ Describe 'ConvertTo-PodeIPAddress' {
         It 'Returns IPAddress from Endpoint' {
             $_a = [System.Net.IPAddress]::Parse('127.0.0.1')
             $_a = [System.Net.IPEndpoint]::new($_a, 8080)
-            $addr = ConvertTo-PodeIPAddress -Endpoint ([System.Net.Endpoint]$_a)
+            $addr = ConvertTo-PodeIPAddress -Address ([System.Net.Endpoint]$_a)
             $addr | Should Not Be $null
             $addr.ToString() | Should Be '127.0.0.1'
         }
@@ -615,10 +615,9 @@ Describe 'ConvertFrom-PodeRequestContent' {
             $PodeContext = @{ 'Server' = @{ 'Type' = 'http'; 'BodyParsers' = @{} } }
             $value = '<root><value>test</value></root>'
 
-            Mock Read-PodeStreamToEnd { return $value }
-
             $result = ConvertFrom-PodeRequestContent -Request @{
-                'ContentEncoding' = [System.Text.Encoding]::UTF8;
+                Body = $value
+                ContentEncoding = [System.Text.Encoding]::UTF8
             } -ContentType 'text/xml'
 
             $result.Data | Should Not Be $null
@@ -630,10 +629,9 @@ Describe 'ConvertFrom-PodeRequestContent' {
             $PodeContext = @{ 'Server' = @{ 'Type' = 'http'; 'BodyParsers' = @{} } }
             $value = '{ "value": "test" }'
 
-            Mock Read-PodeStreamToEnd { return $value }
-
             $result = ConvertFrom-PodeRequestContent -Request @{
-                'ContentEncoding' = [System.Text.Encoding]::UTF8;
+                Body = $value
+                ContentEncoding = [System.Text.Encoding]::UTF8
             } -ContentType 'application/json'
 
             $result.Data | Should Not Be $null
@@ -644,10 +642,9 @@ Describe 'ConvertFrom-PodeRequestContent' {
             $PodeContext = @{ 'Server' = @{ 'Type' = 'http'; 'BodyParsers' = @{} } }
             $value = "value`ntest"
 
-            Mock Read-PodeStreamToEnd { return $value }
-
             $result = ConvertFrom-PodeRequestContent -Request @{
-                'ContentEncoding' = [System.Text.Encoding]::UTF8;
+                Body = $value
+                ContentEncoding = [System.Text.Encoding]::UTF8
             } -ContentType 'text/csv'
 
             $result | Should Not Be $null
@@ -658,10 +655,9 @@ Describe 'ConvertFrom-PodeRequestContent' {
             $PodeContext = @{ 'Server' = @{ 'Type' = 'http'; 'BodyParsers' = @{} } }
             $value = "test"
 
-            Mock Read-PodeStreamToEnd { return $value }
-            
             (ConvertFrom-PodeRequestContent -Request @{
-                'ContentEncoding' = [System.Text.Encoding]::UTF8;
+                Body = $value
+                ContentEncoding = [System.Text.Encoding]::UTF8
             } -ContentType 'text/custom').Data | Should Be 'test'
         }
 
@@ -782,19 +778,19 @@ Describe 'Join-PodePaths' {
 
 Describe 'Get-PodeEndpointInfo' {
     It 'Returns null for no endpoint' {
-        Get-PodeEndpointInfo -Endpoint ([string]::Empty) | Should Be $null
+        Get-PodeEndpointInfo -Address ([string]::Empty) | Should Be $null
     }
 
     It 'Throws an error for an invalid IP endpoint' {
-        { Get-PodeEndpointInfo -Endpoint '700.0.0.a' } | Should Throw 'Failed to parse'
+        { Get-PodeEndpointInfo -Address '700.0.0.a' } | Should Throw 'Failed to parse'
     }
 
     It 'Throws an error for an out-of-range IP endpoint' {
-        { Get-PodeEndpointInfo -Endpoint '700.0.0.0' } | Should Throw 'The IP address supplied is invalid'
+        { Get-PodeEndpointInfo -Address '700.0.0.0' } | Should Throw 'The IP address supplied is invalid'
     }
 
     It 'Throws an error for an invalid Hostname endpoint' {
-        { Get-PodeEndpointInfo -Endpoint '@test.host.com' } | Should Throw 'Failed to parse'
+        { Get-PodeEndpointInfo -Address '@test.host.com' } | Should Throw 'Failed to parse'
     }
 }
 
@@ -866,8 +862,10 @@ Describe 'Invoke-PodeScriptBlock' {
 }
 
 Describe 'ConvertFrom-PodeNameValueToHashTable' {
-    It 'Returns null for no collection' {
-        ConvertFrom-PodeNameValueToHashTable -Collection $null | Should Be $null
+    It 'Returns an empty hashtable for no collection' {
+        $result = ConvertFrom-PodeNameValueToHashTable -Collection $null
+        ($result -is [hashtable]) | Should Be $true
+        $result.Count | Should Be 0
     }
 
     It 'Returns a hashtable from a NameValue collection' {
@@ -880,35 +878,14 @@ Describe 'ConvertFrom-PodeNameValueToHashTable' {
     }
 }
 
-Describe 'Get-PodeCertificate' {
-    It 'Throws error as certificate does not exist' {
-        Mock Get-ChildItem { return $null }
-        { Get-PodeCertificate -Certificate 'name' } | Should Throw 'failed to find'
-    }
-
-    It 'Returns a certificate thumbprint' {
-        Mock Get-ChildItem { return @(@{ 'Subject' = 'name'; 'Thumbprint' = 'some-thumbprint' }) }
-        Get-PodeCertificate -Certificate 'name' | Should Be 'some-thumbprint'
-    }
-}
-
-Describe 'Set-PodeCertificate' {
-    It 'Throws an error for a non-windows machine' {
-        Mock Test-IsWindows { return $false }
-        Mock Write-Host { }
-
-        Set-PodeCertificate -Address 'localhost' -Port 8080 -Certificate 'name' | Out-Null
-
-        Assert-MockCalled Write-Host -Times 1 -Scope It
-    }
-}
-
 Describe 'Get-PodeUrl' {
     It 'Returns a url from the web event' {
         $WebEvent = @{
-            'Protocol' = 'http';
-            'Endpoint' = 'foo.com/';
-            'Path' = 'about'
+            Endpoint = @{
+                Protocol = 'http'
+                Address = 'foo.com/';
+            }
+            Path = 'about'
         }
 
         Get-PodeUrl | Should Be 'http://foo.com/about'
@@ -1193,7 +1170,7 @@ Describe 'Close-PodeRunspaces' {
     }
 }
 
-Describe 'Close-PodeServer' {
+Describe 'Close-PodeServerInternal' {
     Mock Close-PodeRunspaces { }
     Mock Stop-PodeFileMonitor { }
     Mock Close-PodeDisposable { }
@@ -1202,19 +1179,19 @@ Describe 'Close-PodeServer' {
 
     It 'Closes out pode, but with no done flag' {
         $PodeContext = @{ 'Server' = @{ 'Type' = 'Server' } }
-        Close-PodeServer
+        Close-PodeServerInternal
         Assert-MockCalled Write-Host -Times 0 -Scope It
     }
 
     It 'Closes out pode, but with the done flag' {
         $PodeContext = @{ 'Server' = @{ 'Type' = 'Server' } }
-        Close-PodeServer -ShowDoneMessage
+        Close-PodeServerInternal -ShowDoneMessage
         Assert-MockCalled Write-Host -Times 1 -Scope It
     }
 
     It 'Closes out pode, but with no done flag if serverless' {
         $PodeContext = @{ 'Server' = @{ 'Type' = 'Server'; 'IsServerless' = $true } }
-        Close-PodeServer -ShowDoneMessage
+        Close-PodeServerInternal -ShowDoneMessage
         Assert-MockCalled Write-Host -Times 0 -Scope It
     }
 }
@@ -1222,11 +1199,13 @@ Describe 'Close-PodeServer' {
 Describe 'Get-PodeEndpointUrl' {
     It 'Returns default endpoint url' {
         $PodeContext = @{ Server = @{
-            Endpoints = @(@{
-                Ssl = $true
-                Port = 6000
-                Hostname = 'thing.com'
-            })
+            Endpoints = @{
+                Example1 = @{
+                    Port = 6000
+                    Hostname = 'thing.com'
+                    Protocol = 'https'
+                }
+            }
         } }
 
         Get-PodeEndpointUrl | Should Be 'https://thing.com:6000'
@@ -1234,9 +1213,9 @@ Describe 'Get-PodeEndpointUrl' {
 
     It 'Returns a passed endpoint url' {
         $endpoint = @{
-            Ssl = $false
             Port = 7000
             Hostname = 'stuff.com'
+            Protocol = 'http'
         }
 
         Get-PodeEndpointUrl -Endpoint $endpoint | Should Be 'http://stuff.com:7000'
@@ -1244,9 +1223,9 @@ Describe 'Get-PodeEndpointUrl' {
 
     It 'Returns a passed endpoint url, with default port for http' {
         $endpoint = @{
-            Ssl = $false
-            Port = 0
+            Port = 8080
             Hostname = 'stuff.com'
+            Protocol = 'http'
         }
 
         Get-PodeEndpointUrl -Endpoint $endpoint | Should Be 'http://stuff.com:8080'
@@ -1254,9 +1233,17 @@ Describe 'Get-PodeEndpointUrl' {
 
     It 'Returns a passed endpoint url, with default port for https' {
         $endpoint = @{
-            Ssl = $true
-            Port = 0
+            Port = 8443
             Hostname = 'stuff.com'
+            Protocol = 'https'
+        }
+
+        Get-PodeEndpointUrl -Endpoint $endpoint | Should Be 'https://stuff.com:8443'
+    }
+
+    It 'Returns a passed endpoint url, using raw url' {
+        $endpoint = @{
+            Url = 'https://stuff.com:8443'
         }
 
         Get-PodeEndpointUrl -Endpoint $endpoint | Should Be 'https://stuff.com:8443'
@@ -1397,5 +1384,268 @@ Describe 'Out-PodeHost' {
     It 'Writes a hashtable to the Host by pipeline' {
         @{ Name = 'Rick' } | Out-PodeHost
         Assert-MockCalled Out-Default -Scope It -Times 1
+    }
+}
+
+Describe 'Remove-PodeNullKeysFromHashtable' {
+    It 'Removes all null values keys' {
+        $ht = @{
+            Value1 = $null
+            Value2 = @{
+                Value3 = @()
+                Value4 = $null
+            }
+        }
+
+        $ht | Remove-PodeNullKeysFromHashtable
+
+        $ht.ContainsKey('Value1') | Should Be $false
+        $ht.ContainsKey('Value2') | Should Be $true
+        $ht.Value2.ContainsKey('Value3') | Should Be $true
+        $ht.Value2.ContainsKey('Value4') | Should Be $false
+    }
+}
+
+Describe 'Get-PodeDefaultPort' {
+    It 'Returns default port for http' {
+        Get-PodeDefaultPort -Protocol Http | Should Be 8080
+    }
+
+    It 'Returns default port for https' {
+        Get-PodeDefaultPort -Protocol Https | Should Be 8443
+    }
+
+    It 'Returns default port for smtp' {
+        Get-PodeDefaultPort -Protocol Smtp | Should Be 25
+    }
+
+    It 'Returns default port for tcp' {
+        Get-PodeDefaultPort -Protocol Tcp | Should Be 9001
+    }
+
+    It 'Returns default port for ws' {
+        Get-PodeDefaultPort -Protocol Ws | Should Be 9080
+    }
+
+    It 'Returns default port for wss' {
+        Get-PodeDefaultPort -Protocol Wss | Should Be 9443
+    }
+}
+
+Describe 'Convert-PodeQueryStringToHashTable' {
+    It 'Emty for no uri' {
+        $result = Convert-PodeQueryStringToHashTable -Uri ([string]::Empty)
+        $result.Count | Should Be 0
+    }
+
+    It 'Emty for uri but no query' {
+        $result = Convert-PodeQueryStringToHashTable -Uri "/api/users"
+        $result.Count | Should Be 0
+    }
+
+    It 'Hashtable for root query' {
+        $result = Convert-PodeQueryStringToHashTable -Uri "/?Name=Bob"
+        $result.Count | Should Be 1
+        $result['Name'] | Should Be 'Bob'
+    }
+
+    It 'Hashtable for root query, no slash' {
+        $result = Convert-PodeQueryStringToHashTable -Uri "?Name=Bob"
+        $result.Count | Should Be 1
+        $result['Name'] | Should Be 'Bob'
+    }
+
+    It 'Hashtable for root multi-query' {
+        $result = Convert-PodeQueryStringToHashTable -Uri "/?Name=Bob&Age=42"
+        $result.Count | Should Be 2
+        $result['Name'] | Should Be 'Bob'
+        $result['Age'] | Should Be 42
+    }
+
+    It 'Hashtable for root multi-query, no slash' {
+        $result = Convert-PodeQueryStringToHashTable -Uri "?Name=Bob&Age=42"
+        $result.Count | Should Be 2
+        $result['Name'] | Should Be 'Bob'
+        $result['Age'] | Should Be 42
+    }
+
+    It 'Hashtable for non-root query' {
+        $result = Convert-PodeQueryStringToHashTable -Uri "/api/user?Name=Bob"
+        $result.Count | Should Be 1
+        $result['Name'] | Should Be 'Bob'
+    }
+
+    It 'Hashtable for non-root multi-query' {
+        $result = Convert-PodeQueryStringToHashTable -Uri "/api/user?Name=Bob&Age=42"
+        $result.Count | Should Be 2
+        $result['Name'] | Should Be 'Bob'
+        $result['Age'] | Should Be 42
+    }
+
+    It 'Hashtable for non-root multi-query, end slash' {
+        $result = Convert-PodeQueryStringToHashTable -Uri "/api/user/?Name=Bob&Age=42"
+        $result.Count | Should Be 2
+        $result['Name'] | Should Be 'Bob'
+        $result['Age'] | Should Be 42
+    }
+}
+
+Describe 'ConvertFrom-PodeHeaderQValue' {
+    It 'Returns empty' {
+        $result = ConvertFrom-PodeHeaderQValue -Value ''
+        $result.Count | Should Be 0
+    }
+
+    It 'Returns values default to 1' {
+        $result = ConvertFrom-PodeHeaderQValue -Value 'gzip,deflate'
+        $result.Count | Should Be 2
+
+        $result['gzip'] | Should Be 1.0
+        $result['deflate'] | Should Be 1.0
+    }
+
+    It 'Returns values with set quality' {
+        $result = ConvertFrom-PodeHeaderQValue -Value 'gzip;q=0.1,deflate;q=0.8'
+        $result.Count | Should Be 2
+
+        $result['gzip'] | Should Be 0.1
+        $result['deflate'] | Should Be 0.8
+    }
+
+    It 'Returns values with mix' {
+        $result = ConvertFrom-PodeHeaderQValue -Value 'gzip,deflate;q=0.8,identity;q=0'
+        $result.Count | Should Be 3
+
+        $result['gzip'] | Should Be 1.0
+        $result['deflate'] | Should Be 0.8
+        $result['identity'] | Should Be 0
+    }
+}
+
+Describe 'Get-PodeAcceptEncoding' {
+    $PodeContext = @{
+        Server = @{
+            Web = @{ Compression = @{ Enabled = $true } }
+            Compression = @{ Encodings = @('gzip', 'deflate', 'x-gzip') }
+        }
+    }
+
+    It 'Returns empty for no encoding' {
+        Get-PodeAcceptEncoding -AcceptEncoding '' | Should Be ''
+    }
+
+    It 'Returns empty when disabled' {
+        $PodeContext.Server.Web.Compression.Enabled = $false
+        Get-PodeAcceptEncoding -AcceptEncoding '' | Should Be ''
+    }
+
+    It 'Returns first encoding for all default' {
+        $PodeContext.Server.Web.Compression.Enabled = $true
+        Get-PodeAcceptEncoding -AcceptEncoding 'gzip,deflate' | Should Be 'gzip'
+    }
+
+    It 'Returns gzip for older x-gzip' {
+        $PodeContext.Server.Web.Compression.Enabled = $true
+        Get-PodeAcceptEncoding -AcceptEncoding 'x-gzip' | Should Be 'gzip'
+    }
+
+    It 'Returns empty if no encoding matches' {
+        $PodeContext.Server.Web.Compression.Enabled = $true
+        Get-PodeAcceptEncoding -AcceptEncoding 'br,compress' | Should Be ''
+    }
+
+    It 'Returns empty if no encoding matches, and 1 encoding is disabled' {
+        $PodeContext.Server.Web.Compression.Enabled = $true
+        Get-PodeAcceptEncoding -AcceptEncoding 'br,compress,gzip;q=0' | Should Be ''
+    }
+
+    It 'Returns encoding when no other encoding matches, and 1 encoding matches' {
+        $PodeContext.Server.Web.Compression.Enabled = $true
+        Get-PodeAcceptEncoding -AcceptEncoding 'br,compress,gzip' | Should Be 'gzip'
+    }
+
+    It 'Returns highest encoding when weighted' {
+        $PodeContext.Server.Web.Compression.Enabled = $true
+        Get-PodeAcceptEncoding -AcceptEncoding 'gzip;q=0.1,deflate' | Should Be 'deflate'
+    }
+
+    It 'Returns highest encoding when weighted, and identity disabled' {
+        $PodeContext.Server.Web.Compression.Enabled = $true
+        Get-PodeAcceptEncoding -AcceptEncoding 'gzip;q=0.1,deflate,identity;q=0' | Should Be 'deflate'
+    }
+
+    It 'Returns encoding even when none match, and identity disabled' {
+        $PodeContext.Server.Web.Compression.Enabled = $true
+        Get-PodeAcceptEncoding -AcceptEncoding 'br,identity;q=0' | Should Be ''
+    }
+
+    It 'Errors when no encoding matches, and identity disabled' {
+        $PodeContext.Server.Web.Compression.Enabled = $true
+        { Get-PodeAcceptEncoding -AcceptEncoding 'br,identity;q=0' -ThrowError } | Should Throw 'HttpRequestException'
+    }
+
+    It 'Errors when no encoding matches, and wildcard disabled' {
+        $PodeContext.Server.Web.Compression.Enabled = $true
+        { Get-PodeAcceptEncoding -AcceptEncoding 'br,*;q=0' -ThrowError } | Should Throw 'HttpRequestException'
+    }
+
+    It 'Returns empty if identity is allowed, but wildcard disabled' {
+        $PodeContext.Server.Web.Compression.Enabled = $true
+        Get-PodeAcceptEncoding -AcceptEncoding 'identity,*;q=0' | Should Be ''
+    }
+}
+
+Describe 'Get-PodeTransferEncoding' {
+    $PodeContext = @{
+        Server = @{
+            Compression = @{ Encodings = @('gzip', 'deflate', 'x-gzip') }
+        }
+    }
+
+    It 'Returns empty for no encoding' {
+        Get-PodeTransferEncoding -TransferEncoding '' | Should Be ''
+    }
+
+    It 'Returns empty when just chunked' {
+        Get-PodeTransferEncoding -TransferEncoding 'chunked' | Should Be ''
+    }
+
+    It 'Returns first encoding that matches' {
+        Get-PodeTransferEncoding -TransferEncoding 'gzip,deflate' | Should Be 'gzip'
+    }
+
+    It 'Returns encoding when chunked' {
+        Get-PodeTransferEncoding -TransferEncoding 'gzip,chunked' | Should Be 'gzip'
+        Get-PodeTransferEncoding -TransferEncoding 'chunked,gzip' | Should Be 'gzip'
+    }
+
+    It 'Returns first invalid encoding when none match' {
+        Get-PodeTransferEncoding -TransferEncoding 'compress,chunked' | Should Be 'compress'
+    }
+
+    It 'Errors when no encoding matches' {
+        { Get-PodeTransferEncoding -TransferEncoding 'compress,chunked' -ThrowError } | Should Throw 'HttpRequestException'
+    }
+}
+
+Describe 'Get-PodeEncodingFromContentType' {
+    It 'Return utf8 for no type' {
+        $enc = Get-PodeEncodingFromContentType -ContentType ''
+        $enc.EncodingName | Should Be 'Unicode (UTF-8)'
+    }
+
+    It 'Return utf8 for no charset in type' {
+        $enc = Get-PodeEncodingFromContentType -ContentType 'application/json'
+        $enc.EncodingName | Should Be 'Unicode (UTF-8)'
+    }
+
+    It 'Return ascii when charset is set' {
+        $enc = Get-PodeEncodingFromContentType -ContentType 'application/json;charset=ascii'
+        $enc.EncodingName | Should Be 'US-ASCII'
+    }
+
+    It 'Return utf8 when charset is set' {
+        $enc = Get-PodeEncodingFromContentType -ContentType 'application/json;charset=utf-8'
+        $enc.EncodingName | Should Be 'Unicode (UTF-8)'
     }
 }

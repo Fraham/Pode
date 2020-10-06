@@ -8,6 +8,9 @@ Waits for a task to finish, and returns a result if there is one.
 .PARAMETER Task
 The task to wait on.
 
+.PARAMETER Timeout
+An optional Timeout in milliseconds.
+
 .EXAMPLE
 $context = Wait-PodeTask -Task $listener.GetContextAsync()
 #>
@@ -18,15 +21,38 @@ function Wait-PodeTask
     param (
         [Parameter(Mandatory=$true)]
         [System.Threading.Tasks.Task]
-        $Task
+        $Task,
+
+        [Parameter()]
+        [int]
+        $Timeout = 0
     )
+
+    # do we need a timeout?
+    $timeoutTask = $null
+    if ($Timeout -gt 0) {
+        $timeoutTask = [System.Threading.Tasks.Task]::Delay($Timeout)
+    }
+
+    # set the check task
+    if ($null -eq $timeoutTask) {
+        $checkTask = $Task
+    }
+    else {
+        $checkTask = [System.Threading.Tasks.Task]::WhenAny($Task, $timeoutTask)
+    }
 
     # is there a cancel token to supply?
     if (($null -eq $PodeContext) -or ($null -eq $PodeContext.Tokens.Cancellation.Token)) {
-        $Task.Wait()
+        $checkTask.Wait()
     }
     else {
-        $Task.Wait($PodeContext.Tokens.Cancellation.Token)
+        $checkTask.Wait($PodeContext.Tokens.Cancellation.Token)
+    }
+
+    # if the main task isnt complete, it timed out
+    if (($null -ne $timeoutTask) -and (!$Task.IsCompleted)) {
+        throw [System.TimeoutException]::new("Task has timed out after $($Timeout)ms")
     }
 
     # only return a value if the result has one
@@ -223,7 +249,7 @@ function Start-PodeStopwatch
     }
     finally {
         $watch.Stop()
-        Out-Default -InputObject "[Stopwatch]: $($watch.Elapsed) [$($Name)]"
+        "[Stopwatch]: $($watch.Elapsed) [$($Name)]" | Out-PodeHost
     }
 }
 
@@ -297,7 +323,7 @@ function Use-PodeScript
     # we have a path, if it's a directory/wildcard then loop over all files
     if (![string]::IsNullOrWhiteSpace($_path)) {
         $_paths = Get-PodeWildcardFiles -Path $Path -Wildcard '*.ps1'
-        if (!(Test-IsEmpty $_paths)) {
+        if (!(Test-PodeIsEmpty $_paths)) {
             foreach ($_path in $_paths) {
                 Use-PodeScript -Path $_path
             }
@@ -313,6 +339,9 @@ function Use-PodeScript
 
     # dot-source the script
     . $_path
+
+    # load any functions from the file into pode's runspaces
+    Import-PodeFunctionsIntoRunspaceState -FilePath $_path
 }
 
 <#
@@ -363,9 +392,13 @@ function Add-PodeEndware
         $ArgumentList
     )
 
+    # check if the scriptblock has any using vars
+    $ScriptBlock, $usingVars = Invoke-PodeUsingScriptConversion -ScriptBlock $ScriptBlock -PSSession $PSCmdlet.SessionState
+
     # add the scriptblock to array of endware that needs to be run
     $PodeContext.Server.Endware += @{
         Logic = $ScriptBlock
+        UsingVariables = $usingVars
         Arguments = $ArgumentList
     }
 }
@@ -383,9 +416,6 @@ The name of a globally installed Module, or one within the ps_modules directory,
 .PARAMETER Path
 The path, literal or relative, to a Module to import.
 
-.PARAMETER Now
-Import the Module now, into the current runspace.
-
 .EXAMPLE
 Import-PodeModule -Name IISManager
 
@@ -395,24 +425,27 @@ Import-PodeModule -Path './modules/utilities.psm1'
 function Import-PodeModule
 {
     [CmdletBinding(DefaultParameterSetName='Name')]
-    param (
+    param(
         [Parameter(Mandatory=$true, ParameterSetName='Name')]
         [string]
         $Name,
 
         [Parameter(Mandatory=$true, ParameterSetName='Path')]
         [string]
-        $Path,
-
-        [switch]
-        $Now
+        $Path
     )
+
+    # script root path
+    $rootPath = $null
+    if ($null -eq $PodeContext) {
+        $rootPath = (Protect-PodeValue -Value $MyInvocation.PSScriptRoot -Default $pwd.Path)
+    }
 
     # get the path of a module, or import modules on mass
     switch ($PSCmdlet.ParameterSetName.ToLowerInvariant()) {
         'name' {
-            $modulePath = Join-PodeServerRoot -Folder (Join-PodePaths @('ps_modules', $Name))
-            if ([string]::IsNullOrWhiteSpace($modulePath)) {
+            $modulePath = Join-PodeServerRoot -Folder (Join-PodePaths @('ps_modules', $Name)) -Root $rootPath
+            if (Test-PodePath -Path $modulePath -NoStatus) {
                 $Path = (Get-ChildItem (Join-PodePaths @($modulePath, '*', "$($Name).ps*1")) -Recurse -Force | Select-Object -First 1).FullName
             }
             else {
@@ -421,11 +454,11 @@ function Import-PodeModule
         }
 
         'path' {
-            $Path = Get-PodeRelativePath -Path $Path -JoinRoot -Resolve
-            $paths = Get-PodeWildcardFiles -Path $Path -Wildcard '*.ps*1'
-            if (!(Test-IsEmpty $paths)) {
+            $Path = Get-PodeRelativePath -Path $Path -RootPath $rootPath -JoinRoot -Resolve
+            $paths = Get-PodeWildcardFiles -Path $Path -RootPath $rootPath -Wildcard '*.ps*1'
+            if (!(Test-PodeIsEmpty $paths)) {
                 foreach ($_path in $paths) {
-                    Import-PodeModule -Path $_path -Now:$Now
+                    Import-PodeModule -Path $_path
                 }
 
                 return
@@ -443,57 +476,38 @@ function Import-PodeModule
         throw "The module path does not exist: $(Protect-PodeValue -Value $Path -Default $Name)"
     }
 
-    # import the module into the runspace state
-    $PodeContext.RunspaceState.ImportPSModule($Path)
-
-    # import the module now, if specified
-    if ($Now) {
-        Write-Verbose "Importing module now: $($Path)"
-        Import-Module $Path -Force -DisableNameChecking -Scope Global -ErrorAction Stop | Out-Null
-    }
+    Import-Module $Path -Force -DisableNameChecking -Scope Global -ErrorAction Stop | Out-Null
 }
 
 <#
 .SYNOPSIS
-Imports a SnapIn into the current, and all runspaces that Pode uses.
+Imports a Snapin into the current, and all runspaces that Pode uses.
 
 .DESCRIPTION
-Imports a SnapIn into the current, and all runspaces that Pode uses.
+Imports a Snapin into the current, and all runspaces that Pode uses.
 
 .PARAMETER Name
-The name of a SnapIn to import.
-
-.PARAMETER Now
-Import the SnapIn now, into the current runspace.
+The name of a Snapin to import.
 
 .EXAMPLE
-Import-PodeSnapIn -Name 'WDeploySnapin3.0'
+Import-PodeSnapin -Name 'WDeploySnapin3.0'
 #>
-function Import-PodeSnapIn
+function Import-PodeSnapin
 {
     [CmdletBinding()]
     param (
         [Parameter(Mandatory=$true)]
         [string]
-        $Name,
-
-        [switch]
-        $Now
+        $Name
     )
 
     # if non-windows or core, fail
-    if ((Test-IsPSCore) -or (Test-IsUnix)) {
-        throw 'SnapIns are only supported on Windows PowerShell'
+    if ((Test-PodeIsPSCore) -or (Test-PodeIsUnix)) {
+        throw 'Snapins are only supported on Windows PowerShell'
     }
 
-    # import the snap-in into the runspace state
-    $exp = $null
-    $PodeContext.RunspaceState.ImportPSSnapIn($Name, ([ref]$exp))
-
-    # import the snap-in now, if specified
-    if ($Now) {
-        Add-PSSnapin -Name $Name | Out-Null
-    }
+    # import the snap-in
+    Add-PSSnapin -Name $Name | Out-Null
 }
 
 <#
@@ -524,7 +538,7 @@ function Protect-PodeValue
         $Default
     )
 
-    return (Resolve-PodeValue -Check (Test-IsEmpty $Value) -TrueValue $Default -FalseValue $Value)
+    return (Resolve-PodeValue -Check (Test-PodeIsEmpty $Value) -TrueValue $Default -FalseValue $Value)
 }
 
 <#
@@ -666,9 +680,9 @@ Tests if a value is empty - the value can be of any type.
 The value to test.
 
 .EXAMPLE
-if (Test-IsEmpty @{}) { /* logic */ }
+if (Test-PodeIsEmpty @{}) { /* logic */ }
 #>
-function Test-IsEmpty
+function Test-PodeIsEmpty
 {
     [CmdletBinding()]
     [OutputType([bool])]
@@ -712,9 +726,9 @@ Tests if the the current session is running in PowerShell Core.
 Tests if the the current session is running in PowerShell Core.
 
 .EXAMPLE
-if (Test-IsPSCore) { /* logic */ }
+if (Test-PodeIsPSCore) { /* logic */ }
 #>
-function Test-IsPSCore
+function Test-PodeIsPSCore
 {
     [CmdletBinding()]
     [OutputType([bool])]
@@ -731,9 +745,9 @@ Tests if the current OS is Unix.
 Tests if the current OS is Unix.
 
 .EXAMPLE
-if (Test-IsUnix) { /* logic */ }
+if (Test-PodeIsUnix) { /* logic */ }
 #>
-function Test-IsUnix
+function Test-PodeIsUnix
 {
     [CmdletBinding()]
     [OutputType([bool])]
@@ -750,9 +764,9 @@ Tests if the current OS is Windows.
 Tests if the current OS is Windows.
 
 .EXAMPLE
-if (Test-IsWindows) { /* logic */ }
+if (Test-PodeIsWindows) { /* logic */ }
 #>
-function Test-IsWindows
+function Test-PodeIsWindows
 {
     [CmdletBinding()]
     [OutputType([bool])]
@@ -768,6 +782,7 @@ Outputs an object to the main Host.
 
 .DESCRIPTION
 Due to Pode's use of runspaces, this will output a given object back to the main Host.
+It's advised to use this function, so that any output respects the -Quiet flag of the server.
 
 .PARAMETER InputObject
 The object to output.
@@ -787,5 +802,91 @@ function Out-PodeHost
         $InputObject
     )
 
-    $InputObject | Out-Default
+    if (!$PodeContext.Server.Quiet) {
+        $InputObject | Out-Default
+    }
+}
+
+<#
+.SYNOPSIS
+Writes an object to the Host.
+
+.DESCRIPTION
+Writes an object to the Host.
+It's advised to use this function, so that any output respects the -Quiet flag of the server.
+
+.PARAMETER Object
+The object to write.
+
+.PARAMETER ForegroundColor
+An optional foreground colour.
+
+.PARAMETER NoNewLine
+Whether or not to write a new line.
+
+.EXAMPLE
+'Some output' | Write-PodeHost -ForegroundColor Cyan
+#>
+function Write-PodeHost
+{
+    [CmdletBinding()]
+    param(
+        [Parameter(Position=0, ValueFromPipeline=$true)]
+        [object]
+        $Object,
+
+        [Parameter()]
+        [System.ConsoleColor]
+        $ForegroundColor,
+
+        [switch]
+        $NoNewLine
+    )
+
+    if ($PodeContext.Server.Quiet) {
+        return
+    }
+
+    if ($ForegroundColor) {
+        Write-Host -Object $Object -ForegroundColor $ForegroundColor -NoNewline:$NoNewLine
+    }
+    else {
+        Write-Host -Object $Object -NoNewline:$NoNewLine
+    }
+}
+
+<#
+.SYNOPSIS
+Returns whether or not the server is running via IIS.
+
+.DESCRIPTION
+Returns whether or not the server is running via IIS.
+
+.EXAMPLE
+if (Test-PodeIsIIS) { }
+#>
+function Test-PodeIsIIS
+{
+    [CmdletBinding()]
+    param()
+
+    return $PodeContext.Server.IsIIS
+}
+
+<#
+.SYNOPSIS
+Returns whether or not the server is running via Heroku.
+
+.DESCRIPTION
+Returns whether or not the server is running via Heroku.
+
+.EXAMPLE
+if (Test-PodeIsHeroku) { }
+#>
+function Test-PodeIsHeroku
+{
+    [CmdletBinding()]
+    param()
+
+    return $PodeContext.Server.IsHeroku
 }

@@ -2,7 +2,10 @@ $path = $MyInvocation.MyCommand.Path
 $src = (Split-Path -Parent -Path $path) -ireplace '[\\/]tests[\\/]unit', '/src/'
 Get-ChildItem "$($src)/*.ps1" -Recurse | Resolve-Path | ForEach-Object { . $_ }
 
-$PodeContext = @{ 'Server' = $null; }
+$PodeContext = @{
+    Server = $null
+    Metrics = @{ Server = @{ StartTime = [datetime]::UtcNow } }
+}
 
 Describe 'Start-PodeInternalServer' {
     Mock Add-PodePSInbuiltDrives { }
@@ -19,9 +22,12 @@ Describe 'Start-PodeInternalServer' {
     Mock Start-PodeTcpServer { }
     Mock Start-PodeWebServer { }
     Mock Start-PodeServiceServer { }
+    Mock Import-PodeModulesIntoRunspaceState { }
+    Mock Import-PodeSnapinsIntoRunspaceState { }
+    Mock Import-PodeFunctionsIntoRunspaceState { }
 
     It 'Calls one-off script logic' {
-        $PodeContext.Server = @{ 'Type' = ([string]::Empty); 'Logic' = {} }
+        $PodeContext.Server = @{ Type = ([string]::Empty); Logic = {} }
         Start-PodeInternalServer | Out-Null
 
         Assert-MockCalled Invoke-PodeScriptBlock -Times 1 -Scope It
@@ -35,7 +41,7 @@ Describe 'Start-PodeInternalServer' {
     }
 
     It 'Calls smtp server logic' {
-        $PodeContext.Server = @{ 'Type' = 'SMTP'; 'Logic' = {} }
+        $PodeContext.Server = @{ Type = 'SMTP'; Logic = {} }
         Start-PodeInternalServer | Out-Null
 
         Assert-MockCalled Invoke-PodeScriptBlock -Times 1 -Scope It
@@ -49,7 +55,7 @@ Describe 'Start-PodeInternalServer' {
     }
 
     It 'Calls tcp server logic' {
-        $PodeContext.Server = @{ 'Type' = 'TCP'; 'Logic' = {} }
+        $PodeContext.Server = @{ Type = 'TCP'; Logic = {} }
         Start-PodeInternalServer | Out-Null
 
         Assert-MockCalled Invoke-PodeScriptBlock -Times 1 -Scope It
@@ -63,7 +69,7 @@ Describe 'Start-PodeInternalServer' {
     }
 
     It 'Calls http web server logic' {
-        $PodeContext.Server = @{ 'Type' = 'HTTP'; 'Logic' = {} }
+        $PodeContext.Server = @{ Type = 'HTTP'; Logic = {} }
         Start-PodeInternalServer | Out-Null
 
         Assert-MockCalled Invoke-PodeScriptBlock -Times 1 -Scope It
@@ -77,7 +83,7 @@ Describe 'Start-PodeInternalServer' {
     }
 
     It 'Calls https web server logic' {
-        $PodeContext.Server = @{ 'Type' = 'HTTPS'; 'Logic' = {} }
+        $PodeContext.Server = @{ Type = 'HTTPS'; Logic = {} }
         Start-PodeInternalServer | Out-Null
 
         Assert-MockCalled Invoke-PodeScriptBlock -Times 1 -Scope It
@@ -118,6 +124,8 @@ Describe 'Restart-PodeInternalServer' {
                     Types = @{ 'key' = 'value' };
                 };
                 Middleware = @{ 'key' = 'value' };
+                Endpoints = @{ 'key' = 'value' };
+                EndpointsMap = @{ 'key' = 'value' };
                 Endware = @{ 'key' = 'value' };
                 ViewEngine = @{
                     Type = 'pode';
@@ -125,9 +133,8 @@ Describe 'Restart-PodeInternalServer' {
                     Script = $null;
                     IsDynamic = $true;
                 };
-                Cookies = @{
-                    Session = @{ 'key' = 'value' };
-                };
+                Cookies = @{};
+                Sessions = @{ 'key' = 'value' };
                 Authentications = @{ 'key' = 'value' };
                 State = @{ 'key' = 'value' };
                 Configuration = @{ 'key' = 'value' };
@@ -144,8 +151,19 @@ Describe 'Restart-PodeInternalServer' {
                         Connections = [System.Collections.Concurrent.ConcurrentQueue[System.Net.Sockets.SocketAsyncEventArgs]]::new()
                     }
                 }
+                OpenAPI = @{}
                 BodyParsers = @{}
+                AutoImport = @{
+                    Modules = @{ Exported = @() }
+                    Snapins = @{ Exported = @() }
+                    Functions = @{ Exported = @() }
+                }
             };
+            Metrics = @{
+                Server = @{
+                    RestartCount = 0
+                }
+            }
             Timers = @{ 'key' = 'value' }
             Schedules = @{ 'key' = 'value' };
         }
@@ -156,7 +174,7 @@ Describe 'Restart-PodeInternalServer' {
         $PodeContext.Server.Logging.Types.Count | Should Be 0
         $PodeContext.Server.Middleware.Count | Should Be 0
         $PodeContext.Server.Endware.Count | Should Be 0
-        $PodeContext.Server.Cookies.Session.Count | Should Be 0
+        $PodeContext.Server.Sessions.Count | Should Be 0
         $PodeContext.Server.Authentications.Count | Should Be 0
         $PodeContext.Server.State.Count | Should Be 0
         $PodeContext.Server.Configuration | Should Be $null
@@ -166,8 +184,11 @@ Describe 'Restart-PodeInternalServer' {
 
         $PodeContext.Server.ViewEngine.Type | Should Be 'html'
         $PodeContext.Server.ViewEngine.Extension | Should Be 'html'
-        $PodeContext.Server.ViewEngine.Script | Should Be $null
+        $PodeContext.Server.ViewEngine.ScriptBlock | Should Be $null
+        $PodeContext.Server.ViewEngine.UsingVariables | Should Be $null
         $PodeContext.Server.ViewEngine.IsDynamic | Should Be $false
+
+        $PodeContext.Metrics.Server.RestartCount | Should Be 1
     }
 
     It 'Catches exception and throws it' {

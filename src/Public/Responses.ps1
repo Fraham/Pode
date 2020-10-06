@@ -31,7 +31,7 @@ function Set-PodeResponseAttachment
 {
     [CmdletBinding()]
     param (
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory=$true, ValueFromPipeline=$true)]
         [string]
         $Path,
 
@@ -41,7 +41,7 @@ function Set-PodeResponseAttachment
     )
 
     # only attach files from public/static-route directories when path is relative
-    $_path = (Get-PodeStaticRoutePath -Route $Path).Path
+    $_path = (Find-PodeStaticRoute -Path $Path -CheckPublic).Content.Source
 
     # if there's no path, check the original path (in case it's literal/relative)
     if (!(Test-PodePath $_path -NoStatus)) {
@@ -68,11 +68,12 @@ function Set-PodeResponseAttachment
         else {
             $WebEvent.Response.ContentType = $ContentType
         }
+
         Set-PodeHeader -Name 'Content-Disposition' -Value "attachment; filename=$($filename)"
 
         # if serverless, get the content raw and return
         if (!$WebEvent.Streamed) {
-            if (Test-IsPSCore) {
+            if (Test-PodeIsPSCore) {
                 $content = (Get-Content -Path $_path -Raw -AsByteStream)
             }
             else {
@@ -146,7 +147,7 @@ function Write-PodeTextResponse
 {
     [CmdletBinding(DefaultParameterSetName='String')]
     param (
-        [Parameter(ParameterSetName='String')]
+        [Parameter(ParameterSetName='String', ValueFromPipeline=$true)]
         [string]
         $Value,
 
@@ -225,6 +226,30 @@ function Write-PodeTextResponse
             $Bytes = ConvertFrom-PodeValueToBytes -Value $Value
         }
 
+        # check if we need to compress the response
+        if ($PodeContext.Server.Web.Compression.Enabled -and ![string]::IsNullOrWhiteSpace($WebEvent.AcceptEncoding)) {
+            try {
+                $ms = New-Object -TypeName System.IO.MemoryStream
+                $stream = New-Object "System.IO.Compression.$($WebEvent.AcceptEncoding)Stream"($ms, [System.IO.Compression.CompressionMode]::Compress, $true)
+                $stream.Write($Bytes, 0, $Bytes.Length)
+                $stream.Close()
+                $ms.Position = 0
+                $Bytes = $ms.ToArray()
+            }
+            finally {
+                if ($null -ne $stream) {
+                    $stream.Close()
+                }
+
+                if ($null -ne $ms) {
+                    $ms.Close()
+                }
+            }
+
+            # set content encoding header
+            Set-PodeHeader -Name 'Content-Encoding' -Value $WebEvent.AcceptEncoding
+        }
+
         # write the content to the response stream
         $res.ContentLength64 = $Bytes.Length
 
@@ -294,7 +319,7 @@ function Write-PodeFileResponse
 {
     [CmdletBinding()]
     param (
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory=$true, ValueFromPipeline=$true)]
         [ValidateNotNull()]
         [string]
         $Path,
@@ -330,7 +355,10 @@ function Write-PodeFileResponse
     $mainExt = Get-PodeFileExtension -Path $Path -TrimPeriod
 
     # generate dynamic content
-    if (![string]::IsNullOrWhiteSpace($mainExt) -and (($mainExt -ieq 'pode') -or ($mainExt -ieq $PodeContext.Server.ViewEngine.Extension))) {
+    if (![string]::IsNullOrWhiteSpace($mainExt) -and (
+        ($mainExt -ieq 'pode') -or
+        ($mainExt -ieq $PodeContext.Server.ViewEngine.Extension -and $PodeContext.Server.ViewEngine.IsDynamic)
+    )) {
         $content = Get-PodeFileContentUsingViewEngine -Path $Path -Data $Data
 
         # get the sub-file extension, if empty, use original
@@ -343,7 +371,7 @@ function Write-PodeFileResponse
 
     # this is a static file
     else {
-        if (Test-IsPSCore) {
+        if (Test-PodeIsPSCore) {
             $content = (Get-Content -Path $Path -Raw -AsByteStream)
         }
         else {
@@ -384,7 +412,7 @@ function Write-PodeCsvResponse
 {
     [CmdletBinding(DefaultParameterSetName='Value')]
     param (
-        [Parameter(Mandatory=$true, ParameterSetName='Value')]
+        [Parameter(Mandatory=$true, ParameterSetName='Value', ValueFromPipeline=$true)]
         $Value,
 
         [Parameter(Mandatory=$true, ParameterSetName='File')]
@@ -409,7 +437,7 @@ function Write-PodeCsvResponse
                     New-Object psobject -Property $v
                 })
 
-                if (Test-IsPSCore) {
+                if (Test-PodeIsPSCore) {
                     $Value = ($Value | ConvertTo-Csv -Delimiter ',' -IncludeTypeInformation:$false)
                 }
                 else {
@@ -457,7 +485,7 @@ function Write-PodeHtmlResponse
 {
     [CmdletBinding(DefaultParameterSetName='Value')]
     param (
-        [Parameter(Mandatory=$true, ParameterSetName='Value')]
+        [Parameter(Mandatory=$true, ParameterSetName='Value', ValueFromPipeline=$true)]
         $Value,
 
         [Parameter(Mandatory=$true, ParameterSetName='File')]
@@ -520,7 +548,7 @@ function Write-PodeMarkdownResponse
 {
     [CmdletBinding(DefaultParameterSetName='Value')]
     param (
-        [Parameter(Mandatory=$true, ParameterSetName='Value')]
+        [Parameter(Mandatory=$true, ParameterSetName='Value', ValueFromPipeline=$true)]
         $Value,
 
         [Parameter(Mandatory=$true, ParameterSetName='File')]
@@ -591,7 +619,7 @@ function Write-PodeJsonResponse
 {
     [CmdletBinding(DefaultParameterSetName='Value')]
     param (
-        [Parameter(Mandatory=$true, ParameterSetName='Value')]
+        [Parameter(Mandatory=$true, ParameterSetName='Value', ValueFromPipeline=$true)]
         $Value,
 
         [Parameter(Mandatory=$true, ParameterSetName='File')]
@@ -662,7 +690,7 @@ function Write-PodeXmlResponse
 {
     [CmdletBinding(DefaultParameterSetName='Value')]
     param (
-        [Parameter(Mandatory=$true, ParameterSetName='Value')]
+        [Parameter(Mandatory=$true, ParameterSetName='Value', ValueFromPipeline=$true)]
         $Value,
 
         [Parameter(Mandatory=$true, ParameterSetName='File')]
@@ -731,7 +759,7 @@ function Write-PodeViewResponse
 {
     [CmdletBinding()]
     param (
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory=$true, ValueFromPipeline=$true)]
         [string]
         $Path,
 
@@ -880,6 +908,9 @@ Redirecting a user to a new URL, or the same URL as the Request but a different 
 .PARAMETER Url
 Redirect the user to a new URL, or a relative path.
 
+.PARAMETER EndpointName
+The Name of an Endpoint to redirect to.
+
 .PARAMETER Port
 Change the port of the current Request before redirecting.
 
@@ -907,10 +938,14 @@ Move-PodeResponseUrl -Port 9000 -Moved
 function Move-PodeResponseUrl
 {
     [CmdletBinding(DefaultParameterSetName='Url')]
-    param (
+    param(
         [Parameter(Mandatory=$true, ParameterSetName='Url')]
         [string]
         $Url,
+
+        [Parameter(ParameterSetName='Endpoint')]
+        [string]
+        $EndpointName,
 
         [Parameter(ParameterSetName='Components')]
         [int]
@@ -929,6 +964,7 @@ function Move-PodeResponseUrl
         $Moved
     )
 
+    # build the url
     if ($PSCmdlet.ParameterSetName -ieq 'components') {
         $uri = $WebEvent.Request.Url
 
@@ -955,6 +991,19 @@ function Move-PodeResponseUrl
 
         # combine to form the url
         $Url = "$($Protocol)://$($Address)$($PortStr)$($uri.PathAndQuery)"
+    }
+
+    # build the url from an endpoint
+    elseif ($PSCmdlet.ParameterSetName -ieq 'endpoint') {
+        $endpoint = Get-PodeEndpointByName -Name $EndpointName -ThrowError
+
+        # set the port
+        $PortStr = [string]::Empty
+        if (@(80, 443) -notcontains $endpoint.Port) {
+            $PortStr = ":$($endpoint.Port)"
+        }
+
+        $Url = "$($endpoint.Protocol)://$($endpoint.HostName)$($PortStr)$($WebEvent.Request.Url.PathAndQuery)"
     }
 
     Set-PodeHeader -Name 'Location' -Value $Url
@@ -987,7 +1036,7 @@ function Write-PodeTcpClient
 {
     [CmdletBinding()]
     param (
-        [Parameter()]
+        [Parameter(ValueFromPipeline=$true)]
         [string]
         $Message,
 
@@ -1020,6 +1069,9 @@ Reads data from a TCP Client stream.
 .PARAMETER Client
 An optional TcpClient from which to read data.
 
+.PARAMETER Timeout
+An optional Timeout in milliseconds.
+
 .EXAMPLE
 $data = Read-PodeTcpClient
 #>
@@ -1029,7 +1081,11 @@ function Read-PodeTcpClient
     [OutputType([string])]
     param (
         [Parameter()]
-        $Client
+        $Client,
+
+        [Parameter()]
+        [int]
+        $Timeout = 0
     )
 
     # error if serverless
@@ -1040,11 +1096,18 @@ function Read-PodeTcpClient
         $Client = $TcpEvent.Client
     }
 
+    # read the data from the stream
     $bytes = New-Object byte[] 8192
+    $data = [string]::Empty
     $encoder = New-Object System.Text.ASCIIEncoding
     $stream = $Client.GetStream()
-    $bytesRead = (Wait-PodeTask -Task $stream.ReadAsync($bytes, 0, 8192))
-    return $encoder.GetString($bytes, 0, $bytesRead)
+
+    do {
+        $bytesRead = (Wait-PodeTask -Task $stream.ReadAsync($bytes, 0, $bytes.Length) -Timeout $Timeout)
+        $data += $encoder.GetString($bytes, 0, $bytesRead)
+    } while ($stream.DataAvailable)
+
+    return $data
 }
 
 <#
@@ -1154,10 +1217,16 @@ function Set-PodeViewEngine
         $Extension = $Type.ToLowerInvariant()
     }
 
+    # check if the scriptblock has any using vars
+    if ($null -ne $ScriptBlock) {
+        $ScriptBlock, $usingVars = Invoke-PodeUsingScriptConversion -ScriptBlock $ScriptBlock -PSSession $PSCmdlet.SessionState
+    }
+
     # setup view engine config
     $PodeContext.Server.ViewEngine.Type = $Type.ToLowerInvariant()
     $PodeContext.Server.ViewEngine.Extension = $Extension
-    $PodeContext.Server.ViewEngine.Script = $ScriptBlock
+    $PodeContext.Server.ViewEngine.ScriptBlock = $ScriptBlock
+    $PodeContext.Server.ViewEngine.UsingVariables = $usingVars
     $PodeContext.Server.ViewEngine.IsDynamic = (@('html', 'md') -inotcontains $Type)
 }
 
@@ -1182,7 +1251,7 @@ function Use-PodePartialView
     [CmdletBinding()]
     [OutputType([string])]
     param (
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory=$true, ValueFromPipeline=$true)]
         [string]
         $Path,
 
@@ -1258,6 +1327,10 @@ function Send-PodeSignal
         $Depth = 10
     )
 
+    if ($null -eq $PodeContext.Server.WebSockets.Listener) {
+        throw "WebSockets have not been configured to send signal messages"
+    }
+
     if ($Value -isnot [string]) {
         if ($Depth -le 0) {
             $Value = ($Value | ConvertTo-Json -Compress)
@@ -1267,9 +1340,5 @@ function Send-PodeSignal
         }
     }
 
-    $PodeContext.Server.WebSockets.Queues.Messages.Enqueue(@{
-        Value = $Value
-        ClientId = $ClientId
-        Path = $Path
-    })
+    $PodeContext.Server.WebSockets.Listener.AddServerSignal($Value, $Path, $ClientId)
 }

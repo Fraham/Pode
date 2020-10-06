@@ -9,11 +9,12 @@ param (
 
 $Versions = @{
     Pester = '4.8.0'
-    MkDocs = '1.0.4'
+    MkDocs = '1.1.2'
     PSCoveralls = '1.0.0'
     SevenZip = '18.5.0.20180730'
+    DotNetCore = '3.1.5'
     Checksum = '0.2.0'
-    MkDocsTheme = '4.4.0'
+    MkDocsTheme = '5.2.1'
     PlatyPS = '0.14.0'
 }
 
@@ -25,11 +26,6 @@ function Test-PodeBuildIsWindows
 {
     $v = $PSVersionTable
     return ($v.Platform -ilike '*win*' -or ($null -eq $v.Platform -and $v.PSEdition -ieq 'desktop'))
-}
-
-function Test-PodeBuildIsAppVeyor
-{
-    return (![string]::IsNullOrWhiteSpace($env:APPVEYOR_JOB_ID))
 }
 
 function Test-PodeBuildIsGitHub
@@ -44,15 +40,7 @@ function Test-PodeBuildCanCodeCoverage
 
 function Get-PodeBuildService
 {
-    if (Test-PodeBuildIsAppVeyor) {
-        return 'appveyor'
-    }
-
-    if (Test-PodeBuildIsGitHub) {
-        return 'github-actions'
-    }
-
-    return 'travis-ci'
+    return 'github-actions'
 }
 
 function Test-PodeBuildCommand($cmd)
@@ -71,18 +59,13 @@ function Test-PodeBuildCommand($cmd)
 
 function Get-PodeBuildBranch
 {
-    if (Test-PodeBuildIsAppVeyor) {
-        $branch = $env:APPVEYOR_REPO_BRANCH
-    }
-    elseif (Test-PodeBuildIsGitHub) {
-        $branch = $env:GITHUB_REF
-    }
-
-    return ($branch -ireplace 'refs\/heads\/', '')
+    return ($env:GITHUB_REF -ireplace 'refs\/heads\/', '')
 }
 
 function Invoke-PodeBuildInstall($name, $version)
 {
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
     if (Test-PodeBuildIsWindows) {
         if (Test-PodeBuildCommand 'choco') {
             choco install $name --version $version -y
@@ -101,6 +84,17 @@ function Invoke-PodeBuildInstall($name, $version)
     }
 }
 
+function Install-PodeBuildModule($name)
+{
+    if ($null -ne ((Get-Module -ListAvailable $name) | Where-Object { $_.Version -ieq $Versions[$name] })) {
+        return
+    }
+
+    Write-Host "Installing $($name) v$($Versions[$name])"
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    Install-Module -Name "$($name)" -Scope CurrentUser -RequiredVersion "$($Versions[$name])" -Force -SkipPublisherCheck
+}
+
 
 <#
 # Helper Tasks
@@ -108,7 +102,7 @@ function Invoke-PodeBuildInstall($name, $version)
 
 # Synopsis: Stamps the version onto the Module
 task StampVersion {
-    (Get-Content ./src/Pode.psd1) | ForEach-Object { $_ -replace '\$version\$', $Version } | Set-Content ./src/Pode.psd1
+    (Get-Content ./pkg/Pode.psd1) | ForEach-Object { $_ -replace '\$version\$', $Version } | Set-Content ./pkg/Pode.psd1
     (Get-Content ./packers/choco/pode.nuspec) | ForEach-Object { $_ -replace '\$version\$', $Version } | Set-Content ./packers/choco/pode.nuspec
     (Get-Content ./packers/choco/tools/ChocolateyInstall.ps1) | ForEach-Object { $_ -replace '\$version\$', $Version } | Set-Content ./packers/choco/tools/ChocolateyInstall.ps1
 }
@@ -149,21 +143,22 @@ task PackDeps -If (Test-PodeBuildIsWindows) ChocoDeps, {
     }
 }
 
+# Synopsis: Install dependencies for compiling/building
+task BuildDeps {
+    # install dotnet
+    if (!(Test-PodeBuildCommand 'dotnet')) {
+        Invoke-PodeBuildInstall 'dotnetcore' $Versions.DotNetCore
+    }
+}
+
 # Synopsis: Install dependencies for running tests
 task TestDeps {
     # install pester
-    if (((Get-Module -ListAvailable Pester) | Where-Object { $_.Version -ieq $Versions.Pester }) -eq $null) {
-        Write-Host 'Installing Pester'
-        Install-Module -Name Pester -Scope CurrentUser -RequiredVersion $Versions.Pester -Force -SkipPublisherCheck
-    }
+    Install-PodeBuildModule Pester
 
     # install PSCoveralls
-    if (Test-PodeBuildCanCodeCoverage)
-    {
-        if (((Get-Module -ListAvailable PSCoveralls) | Where-Object { $_.Version -ieq $Versions.PSCoveralls }) -eq $null) {
-            Write-Host 'Installing PSCoveralls'
-            Install-Module -Name PSCoveralls -Scope CurrentUser -RequiredVersion $Versions.PSCoveralls -Force -SkipPublisherCheck
-        }
+    if (Test-PodeBuildCanCodeCoverage) {
+        Install-PodeBuildModule PSCoveralls
     }
 }
 
@@ -180,9 +175,28 @@ task DocsDeps ChocoDeps, {
     }
 
     # install platyps
-    if (((Get-Module -ListAvailable PlatyPS) | Where-Object { $_.Version -ieq $Versions.PlatyPS }) -eq $null) {
-        Write-Host 'Installing PlatyPS'
-        Install-Module -Name PlatyPS -Scope CurrentUser -RequiredVersion $Versions.PlatyPS -Force -SkipPublisherCheck
+    Install-PodeBuildModule PlatyPS
+}
+
+
+<#
+# Building
+#>
+
+# Synopsis: Build the .NET Core Listener
+task Build BuildDeps, {
+    if (Test-Path ./src/Libs) {
+        Remove-Item -Path ./src/Libs -Recurse -Force | Out-Null
+    }
+
+    Push-Location ./src/Listener
+
+    try {
+        dotnet build --configuration Release
+        dotnet publish --configuration Release --self-contained --output ../Libs
+    }
+    finally {
+        Pop-Location
     }
 }
 
@@ -193,7 +207,7 @@ task DocsDeps ChocoDeps, {
 
 # Synopsis: Creates a Zip of the Module
 task 7Zip -If (Test-PodeBuildIsWindows) PackDeps, StampVersion, {
-    exec { & 7z -tzip a $Version-Binaries.zip ./src/* }
+    exec { & 7z -tzip a $Version-Binaries.zip ./pkg/* }
 }, PrintChecksum
 
 # Synopsis: Creates a Chocolately package of the Module
@@ -202,7 +216,28 @@ task ChocoPack -If (Test-PodeBuildIsWindows) PackDeps, StampVersion, {
 }
 
 # Synopsis: Package up the Module
-task Pack -If (Test-PodeBuildIsWindows) 7Zip, ChocoPack
+task Pack -If (Test-PodeBuildIsWindows) Build, {
+    $path = './pkg'
+    if (Test-Path $path) {
+        Remove-Item -Path $path -Recurse -Force | Out-Null
+    }
+
+    # create the pkg dir
+    New-Item -Path $path -ItemType Directory -Force | Out-Null
+
+    # which folders do we need?
+    $folders = @('Private', 'Public', 'Misc', 'Libs')
+
+    # create the directories, then copy the source
+    $folders | ForEach-Object {
+        New-Item -ItemType Directory -Path (Join-Path $path $_) -Force | Out-Null
+        Copy-Item -Path "./src/$($_)/*" -Destination (Join-Path $path $_) -Force | Out-Null
+    }
+
+    # copy general files
+    Copy-Item -Path ./src/Pode.psm1 -Destination $path -Force | Out-Null
+    Copy-Item -Path ./src/Pode.psd1 -Destination $path -Force | Out-Null
+}, 7Zip, ChocoPack
 
 
 <#
@@ -210,7 +245,7 @@ task Pack -If (Test-PodeBuildIsWindows) 7Zip, ChocoPack
 #>
 
 # Synopsis: Run the tests
-task Test TestDeps, {
+task Test Build, TestDeps, {
     $p = (Get-Command Invoke-Pester)
     if ($null -eq $p -or $p.Version -ine $Versions.Pester) {
         Import-Module Pester -Force -RequiredVersion $Versions.Pester
@@ -218,28 +253,21 @@ task Test TestDeps, {
 
     $Script:TestResultFile = "$($pwd)/TestResults.xml"
 
-    # if appveyor or github, run code coverage
+    # if run code coverage if enabled
     if (Test-PodeBuildCanCodeCoverage) {
         $srcFiles = (Get-ChildItem "$($pwd)/src/*.ps1" -Recurse -Force).FullName
-        $Script:TestStatus = Invoke-Pester './tests/unit' -OutputFormat NUnitXml -OutputFile $TestResultFile -CodeCoverage $srcFiles -PassThru
+        $Script:TestStatus = Invoke-Pester './tests/unit', './tests/integration' -OutputFormat NUnitXml -OutputFile $TestResultFile -CodeCoverage $srcFiles -PassThru
     }
     else {
-        $Script:TestStatus = Invoke-Pester './tests/unit' -OutputFormat NUnitXml -OutputFile $TestResultFile -Show Failed -PassThru
+        $Script:TestStatus = Invoke-Pester './tests/unit', './tests/integration' -OutputFormat NUnitXml -OutputFile $TestResultFile -Show Failed -PassThru
     }
-}, PushAppVeyorTests, PushCodeCoverage, CheckFailedTests
+}, PushCodeCoverage, CheckFailedTests
 
 # Synopsis: Check if any of the tests failed
 task CheckFailedTests {
     if ($TestStatus.FailedCount -gt 0) {
         throw "$($TestStatus.FailedCount) tests failed"
     }
-}
-
-# Synopsis: If AppVeyor, push result artifacts
-task PushAppVeyorTests -If (Test-PodeBuildIsAppVeyor) {
-    $url = "https://ci.appveyor.com/api/testresults/nunit/$($env:APPVEYOR_JOB_ID)"
-    (New-Object 'System.Net.WebClient').UploadFile($url, $TestResultFile)
-    Push-AppveyorArtifact $TestResultFile
 }
 
 # Synopsis: If AppyVeyor or GitHub, push code coverage stats

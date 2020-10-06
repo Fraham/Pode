@@ -2,12 +2,10 @@
 
 [![MIT licensed](https://img.shields.io/badge/license-MIT-blue.svg)](https://raw.githubusercontent.com/Badgerati/Pode/master/LICENSE.txt)
 [![GitHub Actions](https://img.shields.io/endpoint.svg?url=https%3A%2F%2Factions-badge.atrox.dev%2Fbadgerati%2Fpode%2Fbadge&style=flat&label=GitHub)](https://actions-badge.atrox.dev/badgerati/pode/goto)
-[![AppVeyor](https://img.shields.io/appveyor/ci/Badgerati/Pode/develop.svg?label=AppVeyor)](https://ci.appveyor.com/project/Badgerati/pode/branch/develop)
-[![Travis CI](https://img.shields.io/travis/Badgerati/Pode/develop.svg?label=Travis%20CI)](https://travis-ci.org/Badgerati/Pode)
 [![Code Coverage](https://coveralls.io/repos/github/Badgerati/Pode/badge.svg?branch=develop)](https://coveralls.io/github/Badgerati/Pode?branch=develop)
 [![Gitter](https://badges.gitter.im/Badgerati/Pode.svg)](https://gitter.im/Badgerati/Pode?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge)
 
-Pode is a Cross-Platform framework, *completely written in PowerShell*, to create web servers that host REST APIs, Web Sites, and TCP/SMTP Servers. It also allows you to render dynamic files using `.pode` files, which is effectively embedded PowerShell, or other Third-Party template engines. Pode also has support for middleware, sessions, authentication, and logging; as well as access and rate limiting features. There's also Azure Functions and AWS Lambda support!
+Pode is a Cross-Platform framework to create web servers that host REST APIs, Web Sites, and TCP/SMTP Servers. It also allows you to render dynamic files using `.pode` files, which is effectively embedded PowerShell, or other Third-Party template engines. Pode also has support for middleware, sessions, authentication, and logging; as well as access and rate limiting features. There's also Azure Functions and AWS Lambda support!
 
 [![GetStarted](https://img.shields.io/badge/-Get%20Started!-green.svg?longCache=true&style=for-the-badge)](./Getting-Started/Installation)
 [![QuickLook](https://img.shields.io/badge/-Quick%20Look!-blue.svg?longCache=true&style=for-the-badge)](#quick-look)
@@ -16,12 +14,14 @@ Pode is a Cross-Platform framework, *completely written in PowerShell*, to creat
 
 * Cross-platform using PowerShell Core (with support for PS5)
 * Docker support, including images for ARM/Raspberry Pi
-* Azure Functions and AWS Lambda support
+* Azure Functions, AWS Lambda, and IIS support
+* OpenAPI, Swagger, and ReDoc support
 * Listen on a single or multiple IP address/hostnames
 * Cross-platform support for HTTP, HTTPS, TCP and SMTP
 * Cross-platform support for server-to-client WebSockets, including secure WebSockets
 * Host REST APIs, Web Pages, and Static Content (with caching)
 * Support for custom error pages
+* Request and Response compression using GZip/Deflate
 * Multi-thread support for incoming requests
 * Inbuilt template engine, with support for third-parties
 * Async timers for short-running repeatable processes
@@ -34,7 +34,7 @@ Pode is a Cross-Platform framework, *completely written in PowerShell*, to creat
 * Middleware and Sessions on web servers, with Flash message and CSRF support
 * Authentication on requests, such as Basic and Windows Active Directory
 * Support for dynamically building Routes from Functions and Modules
-* (Windows) Generate/bind self-signed certificates, and signed certificates
+* Generate/bind self-signed certificates
 * (Windows) Open the hosted server as a desktop application
 
 ## Quick Look!

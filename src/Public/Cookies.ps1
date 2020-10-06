@@ -75,7 +75,7 @@ function Set-PodeCookie
 
     # sign the value if we have a secret
     if (![string]::IsNullOrWhiteSpace($Secret)) {
-        $Value = (Invoke-PodeCookieSign -Value $Value -Secret $Secret)
+        $Value = (Invoke-PodeValueSign -Value $Value -Secret $Secret)
     }
 
     # create a new cookie
@@ -84,7 +84,7 @@ function Set-PodeCookie
     $cookie.Discard = $Discard
     $cookie.HttpOnly = $HttpOnly
 
-    if (!(Test-IsEmpty $ExpiryDate)) {
+    if (!(Test-PodeIsEmpty $ExpiryDate)) {
         $cookie.Expires = $ExpiryDate
     }
     elseif ($Duration -gt 0) {
@@ -148,7 +148,7 @@ function Get-PodeCookie
 
     # if a secret was supplied, attempt to unsign the cookie
     if (![string]::IsNullOrWhiteSpace($Secret)) {
-        $value = (Invoke-PodeCookieUnsign -Signature $cookie.Value -Secret $Secret)
+        $value = (Invoke-PodeValueUnsign -Value $cookie.Value -Secret $Secret)
         if (![string]::IsNullOrWhiteSpace($value)) {
             $cookie.Value = $value
         }
@@ -256,7 +256,7 @@ function Test-PodeCookieSigned
         return $false
     }
 
-    $value = (Invoke-PodeCookieUnsign -Signature $cookie.Value -Secret $Secret)
+    $value = (Invoke-PodeValueUnsign -Value $cookie.Value -Secret $Secret)
     return (![string]::IsNullOrWhiteSpace($value))
 }
 
@@ -307,7 +307,7 @@ function Update-PodeCookieExpiry
     }
 
     # extends the expiry on the cookie
-    if (!(Test-IsEmpty $ExpiryDate)) {
+    if (!(Test-PodeIsEmpty $ExpiryDate)) {
         $cookie.Expires = $ExpiryDate
     }
     elseif ($Duration -gt 0) {

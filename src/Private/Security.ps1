@@ -1,3 +1,5 @@
+using namespace System.Security.Cryptography
+
 function Test-PodeIPLimit
 {
     param (
@@ -8,22 +10,24 @@ function Test-PodeIPLimit
 
     $type = 'IP'
 
-    # get the ip address in bytes
-    $IP = @{
-        'String' = $IP.IPAddressToString;
-        'Family' = $IP.AddressFamily;
-        'Bytes' = $IP.GetAddressBytes();
-    }
-
     # get the limit rules and active list
     $rules = $PodeContext.Server.Limits.Rules[$type]
     $active = $PodeContext.Server.Limits.Active[$type]
-    $now = [DateTime]::UtcNow
 
     # if there are no rules, it's valid
-    if (Test-IsEmpty $rules) {
+    if (($null -eq $rules) -or ($rules.Count -eq 0)) {
         return $true
     }
+
+    # get the ip address in bytes
+    $IP = @{
+        String = $IP.IPAddressToString
+        Family = $IP.AddressFamily
+        Bytes = $IP.GetAddressBytes()
+    }
+
+    # now
+    $now = [DateTime]::UtcNow
 
     # is the ip active? (get a direct match, then try grouped subnets)
     $_active_ip = $active[$IP.String]
@@ -37,6 +41,7 @@ function Test-PodeIPLimit
         $_active_ip = @(foreach ($_group in $_groups) {
             if (Test-PodeIPAddressInRange -IP $IP -LowerIP $_group.Rule.Lower -UpperIP $_group.Rule.Upper) {
                 $_group
+                break
             }
         })[0]
     }
@@ -70,6 +75,7 @@ function Test-PodeIPLimit
         $_rule_ip = @(foreach ($rule in $rules.Values) {
             if (Test-PodeIPAddressInRange -IP $IP -LowerIP $rule.Lower -UpperIP $rule.Upper) {
                 $rule
+                break
             }
         })[0]
 
@@ -77,8 +83,8 @@ function Test-PodeIPLimit
         # (add to active list as always allowed - saves running where search everytime)
         if ($null -eq $_rule_ip) {
             $active.Add($IP.String, @{
-                'Rule' = @{
-                    'Limit' = -1
+                Rule = @{
+                    Limit = -1
                 }
             })
 
@@ -89,13 +95,167 @@ function Test-PodeIPLimit
         $_ip = (Resolve-PodeValue -Check $_rule_ip.Grouped -TrueValue $_rule_ip.IP -FalseValue $IP.String)
 
         $active.Add($_ip, @{
-            'Rule' = $_rule_ip;
-            'Rate' = 1;
-            'Expire' = $now.AddSeconds($_rule_ip.Seconds);
+            Rule = $_rule_ip
+            Rate = 1
+            Expire = $now.AddSeconds($_rule_ip.Seconds)
         })
 
         # if limit is 0, it's never allowed
         return ($_rule_ip -ne 0)
+    }
+}
+
+function Test-PodeRouteLimit
+{
+    param (
+        [Parameter(Mandatory=$true)]
+        [ValidateNotNull()]
+        [string]
+        $Path
+    )
+
+    $type = 'Route'
+
+    # get the limit rules and active list
+    $rules = $PodeContext.Server.Limits.Rules[$type]
+    $active = $PodeContext.Server.Limits.Active[$type]
+
+    # if there are no rules, it's valid
+    if (($null -eq $rules) -or ($rules.Count -eq 0)) {
+        return $true
+    }
+
+    # now
+    $now = [DateTime]::UtcNow
+
+    # is the route active?
+    $_active_route = $active[$Path]
+
+    # the ip is active, or part of a grouped subnet
+    if ($null -ne $_active_route) {
+        # if limit is -1, always allowed
+        if ($_active_route.Rule.Limit -eq -1) {
+            return $true
+        }
+
+        # check expire time, a reset if needed
+        if ($now -ge $_active_route.Expire) {
+            $_active_route.Rate = 0
+            $_active_route.Expire = $now.AddSeconds($_active_route.Rule.Seconds)
+        }
+
+        # are we over the limit?
+        if ($_active_route.Rate -ge $_active_route.Rule.Limit) {
+            return $false
+        }
+
+        # increment the rate
+        $_active_route.Rate++
+        return $true
+    }
+
+    # the route isn't active
+    else {
+        # get the route's rule
+        $_rule_route = $rules[$Path]
+
+        # if route not in rules, it's valid (add to active list as always allowed)
+        if ($null -eq $_rule_route) {
+            $active.Add($Path, @{
+                Rule = @{
+                    Limit = -1
+                }
+            })
+
+            return $true
+        }
+
+        # add route to active list
+        $active.Add($Path, @{
+            Rule = $_rule_route
+            Rate = 1
+            Expire = $now.AddSeconds($_rule_route.Seconds)
+        })
+
+        # if limit is 0, it's never allowed
+        return ($_rule_route -ne 0)
+    }
+}
+
+function Test-PodeEndpointLimit
+{
+    param (
+        [Parameter(Mandatory=$true)]
+        [ValidateNotNull()]
+        [string]
+        $EndpointName
+    )
+
+    $type = 'Endpoint'
+
+    # get the limit rules and active list
+    $rules = $PodeContext.Server.Limits.Rules[$type]
+    $active = $PodeContext.Server.Limits.Active[$type]
+
+    # if there are no rules, it's valid
+    if (($null -eq $rules) -or ($rules.Count -eq 0)) {
+        return $true
+    }
+
+    # now
+    $now = [DateTime]::UtcNow
+
+    # is the endpoint active?
+    $_active_endpoint = $active[$EndpointName]
+
+    # the endpoint is active
+    if ($null -ne $_active_endpoint) {
+        # if limit is -1, always allowed
+        if ($_active_endpoint.Rule.Limit -eq -1) {
+            return $true
+        }
+
+        # check expire time, a reset if needed
+        if ($now -ge $_active_endpoint.Expire) {
+            $_active_endpoint.Rate = 0
+            $_active_endpoint.Expire = $now.AddSeconds($_active_endpoint.Rule.Seconds)
+        }
+
+        # are we over the limit?
+        if ($_active_endpoint.Rate -ge $_active_endpoint.Rule.Limit) {
+            return $false
+        }
+
+        # increment the rate
+        $_active_endpoint.Rate++
+        return $true
+    }
+
+    # the endpoint isn't active
+    else {
+        # get the endpoint's rule
+        $_rule_endpoint = $rules[$EndpointName]
+
+        # if endpoint not in rules, it's valid (add to active list as always allowed)
+        if ($null -eq $_rule_endpoint) {
+            $active.Add($EndpointName, @{
+                Rule = @{
+                    Limit = -1
+                }
+            })
+
+            return $true
+        }
+
+        # add endpoint to active list
+        $active.Add($EndpointName, @{
+            Rule = $_rule_endpoint
+            Rate = 1
+            Expire = $now.AddSeconds($_rule_endpoint.Seconds)
+        })
+
+        # if limit is 0, it's never allowed
+        return ($_rule_endpoint -ne 0)
     }
 }
 
@@ -109,23 +269,23 @@ function Test-PodeIPAccess
 
     $type = 'IP'
 
-    # get the ip address in bytes
-    $IP = @{
-        'Family' = $IP.AddressFamily;
-        'Bytes' = $IP.GetAddressBytes();
-    }
-
     # get permission lists for ip
     $allow = $PodeContext.Server.Access.Allow[$type]
     $deny = $PodeContext.Server.Access.Deny[$type]
 
     # are they empty?
-    $alEmpty = (Test-IsEmpty $allow)
-    $dnEmpty = (Test-IsEmpty $deny)
+    $alEmpty = (($null -eq $allow) -or ($allow.Count -eq 0))
+    $dnEmpty = (($null -eq $deny) -or ($deny.Count -eq 0))
 
     # if both are empty, value is valid
     if ($alEmpty -and $dnEmpty) {
         return $true
+    }
+
+    # get the ip address in bytes
+    $IP = @{
+        Family = $IP.AddressFamily
+        Bytes = $IP.GetAddressBytes()
     }
 
     # if value in allow, it's allowed
@@ -133,6 +293,7 @@ function Test-PodeIPAccess
         $match = @(foreach ($value in $allow.Values) {
             if (Test-PodeIPAddressInRange -IP $IP -LowerIP $value.Lower -UpperIP $value.Upper) {
                 $value
+                break
             }
         })[0]
 
@@ -146,6 +307,7 @@ function Test-PodeIPAccess
         $match = @(foreach ($value in $deny.Values) {
             if (Test-PodeIPAddressInRange -IP $IP -LowerIP $value.Lower -UpperIP $value.Upper) {
                 $value
+                break
             }
         })[0]
 
@@ -242,6 +404,118 @@ function Add-PodeIPLimit
     })
 }
 
+function Add-PodeRouteLimit
+{
+    param (
+        [Parameter(Mandatory=$true)]
+        [ValidateNotNull()]
+        [string]
+        $Path,
+
+        [Parameter(Mandatory=$true)]
+        [int]
+        $Limit,
+
+        [Parameter(Mandatory=$true)]
+        [int]
+        $Seconds,
+
+        [switch]
+        $Group
+    )
+
+    # current limit type
+    $type = 'Route'
+
+    # ensure limit and seconds are non-zero and negative
+    if ($Limit -le 0) {
+        throw "Limit value cannot be 0 or less for $($IP)"
+    }
+
+    if ($Seconds -le 0) {
+        throw "Seconds value cannot be 0 or less for $($IP)"
+    }
+
+    # get current rules
+    $rules = $PodeContext.Server.Limits.Rules[$type]
+
+    # setup up perm type
+    if ($null -eq $rules) {
+        $PodeContext.Server.Limits.Rules[$type] = @{}
+        $PodeContext.Server.Limits.Active[$type] = @{}
+        $rules = $PodeContext.Server.Limits.Rules[$type]
+    }
+
+    # have we already added the route?
+    elseif ($rules.ContainsKey($Path)) {
+        return
+    }
+
+    # add limit rule for the route
+    $rules.Add($Path, @{
+        Limit = $Limit
+        Seconds = $Seconds
+        Grouped = [bool]$Group
+        Path = $Path
+    })
+}
+
+function Add-PodeEndpointLimit
+{
+    param (
+        [Parameter(Mandatory=$true)]
+        [ValidateNotNull()]
+        [string]
+        $EndpointName,
+
+        [Parameter(Mandatory=$true)]
+        [int]
+        $Limit,
+
+        [Parameter(Mandatory=$true)]
+        [int]
+        $Seconds,
+
+        [switch]
+        $Group
+    )
+
+    # current limit type
+    $type = 'Endpoint'
+
+    # ensure limit and seconds are non-zero and negative
+    if ($Limit -le 0) {
+        throw "Limit value cannot be 0 or less for $($IP)"
+    }
+
+    if ($Seconds -le 0) {
+        throw "Seconds value cannot be 0 or less for $($IP)"
+    }
+
+    # get current rules
+    $rules = $PodeContext.Server.Limits.Rules[$type]
+
+    # setup up perm type
+    if ($null -eq $rules) {
+        $PodeContext.Server.Limits.Rules[$type] = @{}
+        $PodeContext.Server.Limits.Active[$type] = @{}
+        $rules = $PodeContext.Server.Limits.Rules[$type]
+    }
+
+    # have we already added the endpoint?
+    elseif ($rules.ContainsKey($EndpointName)) {
+        return
+    }
+
+    # add limit rule for the endpoint
+    $rules.Add($EndpointName, @{
+        Limit = $Limit
+        Seconds = $Seconds
+        Grouped = [bool]$Group
+        EndpointName = $EndpointName
+    })
+}
+
 function Add-PodeIPAccess
 {
     param (
@@ -315,18 +589,18 @@ function Get-PodeCsrfToken
     $key = $PodeContext.Server.Cookies.Csrf.Name
 
     # check the payload
-    if (!(Test-IsEmpty $WebEvent.Data[$key])) {
+    if (!(Test-PodeIsEmpty $WebEvent.Data[$key])) {
         return $WebEvent.Data[$key]
     }
 
     # check the query string
-    if (!(Test-IsEmpty $WebEvent.Query[$key])) {
+    if (!(Test-PodeIsEmpty $WebEvent.Query[$key])) {
         return $WebEvent.Query[$key]
     }
 
     # check the headers
     $value = (Get-PodeHeader -Name $key)
-    if (!(Test-IsEmpty $value)) {
+    if (!(Test-PodeIsEmpty $value)) {
         return $value
     }
 
@@ -346,7 +620,7 @@ function Test-PodeCsrfToken
     )
 
     # if there's no token/secret, fail
-    if ((Test-IsEmpty $Secret) -or (Test-IsEmpty $Token)) {
+    if ((Test-PodeIsEmpty $Secret) -or (Test-PodeIsEmpty $Token)) {
         return $false
     }
 
@@ -376,7 +650,7 @@ function New-PodeCsrfSecret
 {
     # see if there's already a secret in session/cookie
     $secret = (Get-PodeCsrfSecret)
-    if (!(Test-IsEmpty $secret)) {
+    if (!(Test-PodeIsEmpty $secret)) {
         return $secret
     }
 
@@ -446,5 +720,158 @@ function Restore-PodeCsrfToken
 
 function Test-PodeCsrfConfigured
 {
-    return (!(Test-IsEmpty $PodeContext.Server.Cookies.Csrf))
+    return (!(Test-PodeIsEmpty $PodeContext.Server.Cookies.Csrf))
+}
+
+function Get-PodeCertificateByFile
+{
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]
+        $Certificate,
+
+        [Parameter()]
+        [string]
+        $Password = $null
+    )
+
+    $path = Get-PodeRelativePath -Path $Certificate -JoinRoot -Resolve
+    $cert = $null
+
+    if ([string]::IsNullOrWhiteSpace($Password)) {
+        $cert = [X509Certificates.X509Certificate2]::new($path)
+    }
+    else {
+        $cert = [X509Certificates.X509Certificate2]::new($path, $Password)
+    }
+
+    return $cert
+}
+
+function Find-PodeCertificateInCertStore
+{
+    param(
+        [Parameter(Mandatory=$true)]
+        [X509Certificates.X509FindType]
+        $FindType,
+
+        [Parameter(Mandatory=$true)]
+        [string]
+        $Query
+    )
+
+    # fail if not windows
+    if (!(Test-PodeIsWindows)) {
+        throw "Certificate Thumbprints/Name are only supported on Windows"
+    }
+
+    # open the currentuser\my store
+    $x509store = [X509Certificates.X509Store]::new(
+        [X509Certificates.StoreName]::My,
+        [X509Certificates.StoreLocation]::CurrentUser
+    )
+
+    try {
+        # attempt to find the cert
+        $x509store.Open([X509Certificates.OpenFlags]::ReadOnly)
+        $x509certs = $x509store.Certificates.Find($FindType, $Query, $false)
+    }
+    finally {
+        # close the store!
+        if ($null -ne $x509store) {
+            Close-PodeDisposable -Disposable $x509store -Close
+        }
+    }
+
+    # fail if no cert found for query
+    if (($null -eq $x509certs) -or ($x509certs.Count -eq 0)) {
+        throw "No certificate could be found in CurrentUser\My for '$($Thumbprint)'"
+    }
+
+    return ([X509Certificates.X509Certificate2]($x509certs[0]))
+}
+
+function Get-PodeCertificateByThumbprint
+{
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]
+        $Thumbprint
+    )
+
+    return (Find-PodeCertificateInCertStore -FindType [X509FindType]::FindByThumbprint -Query $Thumbprint)
+}
+
+function Get-PodeCertificateByName
+{
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]
+        $Name
+    )
+
+    return (Find-PodeCertificateInCertStore -FindType [X509FindType]::FindBySubjectName -Query $Name)
+}
+
+function New-PodeSelfSignedCertificate
+{
+    $sanBuilder = [X509Certificates.SubjectAlternativeNameBuilder]::new()
+    $sanBuilder.AddIpAddress([ipaddress]::Loopback) | Out-Null
+    $sanBuilder.AddIpAddress([ipaddress]::IPv6Loopback) | Out-Null
+    $sanBuilder.AddDnsName('localhost') | Out-Null
+
+    if (![string]::IsNullOrWhiteSpace($env:COMPUTERNAME)) {
+        $sanBuilder.AddDnsName($env:COMPUTERNAME) | Out-Null
+    }
+
+    $rsa = [RSA]::Create(2048)
+    $distinguishedName = [X500DistinguishedName]::new("CN=localhost")
+
+    $req = [X509Certificates.CertificateRequest]::new(
+        $distinguishedName,
+        $rsa,
+        [HashAlgorithmName]::SHA256,
+        [RSASignaturePadding]::Pkcs1
+    )
+
+    $flags = (
+        [X509Certificates.X509KeyUsageFlags]::DataEncipherment -bor
+        [X509Certificates.X509KeyUsageFlags]::KeyEncipherment -bor
+        [X509Certificates.X509KeyUsageFlags]::DigitalSignature
+    )
+
+    $req.CertificateExtensions.Add(
+        [X509Certificates.X509KeyUsageExtension]::new(
+            $flags,
+            $false
+        )
+    ) | Out-Null
+
+    $oid = [OidCollection]::new()
+    $oid.Add([Oid]::new('1.3.6.1.5.5.7.3.1')) | Out-Null
+
+    $req.CertificateExtensions.Add(
+        [X509Certificates.X509EnhancedKeyUsageExtension]::new(
+            $oid,
+            $false
+        )
+    )
+
+    $req.CertificateExtensions.Add($sanBuilder.Build()) | Out-Null
+
+    $cert = $req.CreateSelfSigned(
+        [System.DateTimeOffset]::UtcNow.AddDays(-1),
+        [System.DateTimeOffset]::UtcNow.AddYears(10)
+    )
+
+    if (Test-PodeIsWindows) {
+        $cert.FriendlyName = 'localhost'
+    }
+
+    $cert = [X509Certificates.X509Certificate2]::new(
+        $cert.Export([X509Certificates.X509ContentType]::Pfx, 'self-signed'),
+        'self-signed'
+    )
+
+    return $cert
 }

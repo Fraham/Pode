@@ -1,37 +1,42 @@
+using namespace Pode
+
 function Start-PodeSmtpServer
 {
     # ensure we have smtp handlers
-    if (Test-IsEmpty (Get-PodeHandler -Type Smtp)) {
+    if (Test-PodeIsEmpty (Get-PodeHandler -Type Smtp)) {
         throw 'No SMTP handlers have been defined'
     }
 
+    # the endpoint to listen on
+    $endpoint = @($PodeContext.Server.Endpoints.Values)[0]
+
     # grab the relavant port
-    $port = $PodeContext.Server.Endpoints[0].Port
-    if ($port -eq 0) {
-        $port = 25
-    }
+    $port = $endpoint.Port
 
     # get the IP address for the server
-    $ipAddress = $PodeContext.Server.Endpoints[0].Address
+    $ipAddress = $endpoint.Address
     if (Test-PodeHostname -Hostname $ipAddress) {
         $ipAddress = (Get-PodeIPAddressesForHostname -Hostname $ipAddress -Type All | Select-Object -First 1)
         $ipAddress = (Get-PodeIPAddress $ipAddress)
     }
 
+    # create the listener
+    $listener = [PodeListener]::new($PodeContext.Tokens.Cancellation.Token, [PodeListenerType]::Smtp)
+    $listener.ErrorLoggingEnabled = (Test-PodeErrorLoggingEnabled)
+
     try
     {
-        # create the listener for smtp
-        $endpoint = New-Object System.Net.IPEndPoint($ipAddress, $port)
-        $listener = New-Object System.Net.Sockets.TcpListener -ArgumentList $endpoint
-
-        # start listener
+        # register endpoint on the listener
+        $socket = [PodeSocket]::new($ipAddress, $port, $PodeContext.Server.Sockets.Ssl.Protocols, $null)
+        $socket.ReceiveTimeout = $PodeContext.Server.Sockets.ReceiveTimeout
+        $socket.Hostname = $endpoint.HostName
+        $listener.Add($socket)
         $listener.Start()
     }
     catch {
-        if ($null -ne $listener) {
-            $listener.Stop()
-        }
-
+        $_ | Write-PodeErrorLog
+        $_.Exception | Write-PodeErrorLog -CheckInnerException
+        Close-PodeDisposable -Disposable $listener
         throw $_.Exception
     }
 
@@ -47,132 +52,78 @@ function Start-PodeSmtpServer
             $ThreadId
         )
 
-        # scriptblock for the core smtp message processing logic
-        $process = {
-            # if there's no client, just return
-            if ($null -eq $SmtpEvent.Client) {
-                return
-            }
-
-            # variables to store data for later processing
-            $mail_from = [string]::Empty
-            $rcpt_tos = @()
-            $data = [string]::Empty
-
-            # open response to smtp request
-            Write-PodeTcpClient -Message "220 $($PodeContext.Server.Endpoints[0].HostName) -- Pode Proxy Server"
-            $msg = [string]::Empty
-
-            # respond to smtp request
-            while ($true)
-            {
-                try { $msg = (Read-PodeTcpClient) }
-                catch {
-                    $_ | Write-PodeErrorLog
-                    break
-                }
-
-                try {
-                    if (!(Test-IsEmpty $msg)) {
-                        if ($msg.StartsWith('QUIT')) {
-                            Write-PodeTcpClient -Message '221 Bye'
-                            Close-PodeTcpConnection
-                            break
-                        }
-
-                        if ($msg.StartsWith('EHLO') -or $msg.StartsWith('HELO')) {
-                            Write-PodeTcpClient -Message '250 OK'
-                        }
-
-                        if ($msg.StartsWith('RCPT TO')) {
-                            Write-PodeTcpClient -Message '250 OK'
-                            $rcpt_tos += (Get-PodeSmtpEmail $msg)
-                        }
-
-                        if ($msg.StartsWith('MAIL FROM')) {
-                            Write-PodeTcpClient -Message '250 OK'
-                            $mail_from = (Get-PodeSmtpEmail $msg)
-                        }
-
-                        if ($msg.StartsWith('DATA'))
-                        {
-                            Write-PodeTcpClient -Message '354 Start mail input; end with <CR><LF>.<CR><LF>'
-                            $data = (Read-PodeTcpClient)
-                            Write-PodeTcpClient -Message '250 OK'
-
-                            # set event data/headers
-                            $SmtpEvent.Email.From = $mail_from
-                            $SmtpEvent.Email.To = $rcpt_tos
-                            $SmtpEvent.Email.Data = $data
-                            $SmtpEvent.Email.Headers = (Get-PodeSmtpHeadersFromData $data)
-
-                            # set the subject/priority/content-types
-                            $SmtpEvent.Email.Subject = $SmtpEvent.Headers['Subject']
-                            $SmtpEvent.Email.IsUrgent = (($SmtpEvent.Headers['Priority'] -ieq 'urgent') -or ($SmtpEvent.Headers['Importance'] -ieq 'high'))
-                            $SmtpEvent.Email.ContentType = $SmtpEvent.Headers['Content-Type']
-                            $SmtpEvent.Email.ContentEncoding = $SmtpEvent.Headers['Content-Transfer-Encoding']
-
-                            # set the email body
-                            $SmtpEvent.Email.Body = (Get-PodeSmtpBody -Data $data -ContentType $SmtpEvent.ContentType -ContentEncoding $SmtpEvent.ContentEncoding)
-
-                            # call user handlers for processing smtp data
-                            $handlers = Get-PodeHandler -Type Smtp
-                            foreach ($name in $handlers.Keys) {
-                                $handler = $handlers[$name]
-                                Invoke-PodeScriptBlock -ScriptBlock $handler.Logic -Arguments (@($SmtpEvent) + @($handler.Arguments)) -Scoped -Splat
-                            }
-
-                            # reset the to list
-                            $rcpt_tos = @()
-                        }
-                    }
-                }
-                catch [exception] {
-                    $_ | Write-PodeErrorLog
-                    throw $_.exception
-                }
-            }
-        }
-
         try
         {
-            while (!$PodeContext.Tokens.Cancellation.IsCancellationRequested)
+            while ($Listener.IsListening -and !$PodeContext.Tokens.Cancellation.IsCancellationRequested)
             {
-                # get an incoming request
-                $client = (Wait-PodeTask -Task $Listener.AcceptTcpClientAsync())
+                # get email
+                $context = (Wait-PodeTask -Task $Listener.GetContextAsync($PodeContext.Tokens.Cancellation.Token))
 
-                # convert the ip
-                $ip = (ConvertTo-PodeIPAddress -Endpoint $client.Client.RemoteEndPoint)
+                try
+                {
+                    $Request = $context.Request
+                    $Response = $context.Response
 
-                # ensure the request ip is allowed
-                if (!(Test-PodeIPAccess -IP $ip) -or !(Test-PodeIPLimit -IP $ip)) {
-                    Close-PodeTcpConnection -Quit
-                }
-
-                # deal with smtp call
-                else {
-                    $SmtpEvent = @{
-                        Client = $client
+                    $TcpEvent = @{
+                        Response = $Response
+                        Request = $Request
                         Lockable = $PodeContext.Lockable
-                        Email = $null
+                        Email = @{
+                            From = $Request.From
+                            To = $Request.To
+                            Data = $Request.RawBody
+                            Headers = $Request.Headers
+                            Subject = $Request.Subject
+                            IsUrgent = $Request.IsUrgent
+                            ContentType = $Request.ContentType
+                            ContentEncoding = $Request.ContentEncoding
+                            Body = $Request.Body
+                        }
                     }
 
-                    Invoke-PodeScriptBlock -ScriptBlock $process
-                    Close-PodeTcpConnection -Quit
+                    # convert the ip
+                    $ip = (ConvertTo-PodeIPAddress -Address $Request.RemoteEndPoint)
+
+                    # ensure the request ip is allowed
+                    if (!(Test-PodeIPAccess -IP $ip)) {
+                        $Response.WriteLine('554 Your IP address was rejected', $true)
+                    }
+
+                    # has the ip hit the rate limit?
+                    elseif (!(Test-PodeIPLimit -IP $ip)) {
+                        $Response.WriteLine('554 Your IP address has hit the rate limit', $true)
+                    }
+
+                    # deal with smtp call
+                    else {
+                        $handlers = Get-PodeHandler -Type Smtp
+                        foreach ($name in $handlers.Keys) {
+                            $handler = $handlers[$name]
+
+                            $_args = @($TcpEvent) + @($handler.Arguments)
+                            if ($null -ne $handler.UsingVariables) {
+                                $_args = @($handler.UsingVariables.Value) + $_args
+                            }
+
+                            Invoke-PodeScriptBlock -ScriptBlock $handler.Logic -Arguments $_args -Scoped -Splat
+                        }
+                    }
+                }
+                finally {
+                    Close-PodeDisposable -Disposable $context
                 }
             }
         }
-        catch [System.OperationCanceledException] {
-            Close-PodeTcpConnection -Quit
-        }
+        catch [System.OperationCanceledException] {}
         catch {
             $_ | Write-PodeErrorLog
+            $_.Exception | Write-PodeErrorLog -CheckInnerException
             throw $_.Exception
         }
     }
 
     # start the runspace for listening on x-number of threads
-    1..$PodeContext.Threads | ForEach-Object {
+    1..$PodeContext.Threads.Web | ForEach-Object {
         Add-PodeRunspace -Type 'Main' -ScriptBlock $listenScript `
             -Parameters @{ 'Listener' = $listener; 'ThreadId' = $_ }
     }
@@ -185,128 +136,24 @@ function Start-PodeSmtpServer
             $Listener
         )
 
-        try
-        {
-            while (!$PodeContext.Tokens.Cancellation.IsCancellationRequested)
-            {
+        try {
+            while ($Listener.IsListening -and !$PodeContext.Tokens.Cancellation.IsCancellationRequested) {
                 Start-Sleep -Seconds 1
             }
         }
         catch [System.OperationCanceledException] {}
         catch {
             $_ | Write-PodeErrorLog
+            $_.Exception | Write-PodeErrorLog -CheckInnerException
             throw $_.Exception
         }
         finally {
-            if ($null -ne $Listener) {
-                $Listener.Stop()
-            }
+            Close-PodeDisposable -Disposable $Listener
         }
     }
 
     Add-PodeRunspace -Type 'Main' -ScriptBlock $waitScript -Parameters @{ 'Listener' = $listener }
 
     # state where we're running
-    return @("smtp://$($PodeContext.Server.Endpoints[0].HostName):$($port)")
-}
-
-
-function Get-PodeSmtpEmail
-{
-    param (
-        [Parameter()]
-        [string]
-        $Value
-    )
-
-    $tmp = @($Value -isplit ':')
-    if ($tmp.Length -gt 1) {
-        return $tmp[1].Trim().Trim(' <>')
-    }
-
-    return [string]::Empty
-}
-
-function Get-PodeSmtpBody
-{
-    param (
-        [Parameter()]
-        [string]
-        $Data,
-
-        [Parameter()]
-        [string]
-        $ContentType,
-
-        [Parameter()]
-        [string]
-        $ContentEncoding
-    )
-
-    # split the message up
-    $dataSplit = @($Data -isplit [System.Environment]::NewLine)
-
-    # get the index of the first blank line, and last dot
-    $indexOfBlankLine = $dataSplit.IndexOf([string]::Empty)
-    $indexOfLastDot = [array]::LastIndexOf($dataSplit, '.')
-
-    # get the body
-    $body = ($dataSplit[($indexOfBlankLine + 1)..($indexOfLastDot - 2)] -join [System.Environment]::NewLine)
-
-    # if there's no body, just return
-    if (($indexOfLastDot -eq -1) -or (Test-IsEmpty $body)) {
-        return $body
-    }
-
-    # decode body based on encoding
-    switch ($ContentEncoding.ToLowerInvariant()) {
-        'base64' {
-            $body = [System.Convert]::FromBase64String($body)
-        }
-    }
-
-    # only if body is bytes, first decode based on type
-    switch ($ContentType) {
-        { $_ -ilike '*utf-7*' } {
-            $body = [System.Text.Encoding]::UTF7.GetString($body)
-        }
-
-        { $_ -ilike '*utf-8*' } {
-            $body = [System.Text.Encoding]::UTF8.GetString($body)
-        }
-
-        { $_ -ilike '*utf-16*' } {
-            $body = [System.Text.Encoding]::Unicode.GetString($body)
-        }
-
-        { $_ -ilike '*utf-32*' } {
-            $body = [System.Text.Encoding]::UTF32.GetString($body)
-        }
-    }
-
-    return $body
-}
-
-function Get-PodeSmtpHeadersFromData
-{
-    param (
-        [Parameter()]
-        [string]
-        $Data
-    )
-
-    $headers = @{}
-    $lines = @($Data -isplit [System.Environment]::NewLine)
-
-    foreach ($line in $lines) {
-        if ([string]::IsNullOrWhiteSpace($line)) {
-            break
-        }
-
-        if ($line -imatch '^(?<name>.*?)\:\s+(?<value>.*?)$') {
-            $headers[$Matches['name'].Trim()] = $Matches['value'].Trim()
-        }
-    }
-
-    return $headers
+    return @("smtp://$($endpoint.HostName):$($port)")
 }

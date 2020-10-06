@@ -32,7 +32,7 @@ Here, anyone who calls `http://localhost:8080/ping` will receive the following r
 }
 ```
 
-The scriptblock for the route will be supplied with a single argument that contains information about the current web event. This argument will contain the `Request` and `Response` objects, `Data` (from POST), and the `Query` (from the query string of the URL), as well as any `Parameters` from the route itself (eg: `/:accountId`).
+The scriptblock for the route will be supplied with a single argument that contains information about the current [web event](../../WebEvent). This argument will contain the `Request` and `Response` objects, `Data` (from POST), and the `Query` (from the query string of the URL), as well as any `Parameters` from the route itself (eg: `/:accountId`).
 
 ## Payloads
 
@@ -126,3 +126,82 @@ The following request will invoke the above route:
 ```powershell
 Invoke-WebRequest -Uri 'http://localhost:8080/users/12345' -Method Get
 ```
+
+## Script from File
+
+You normally define a route's script using the `-ScriptBlock` parameter however, you can also reference a file with the required scriptblock using `-FilePath`. Using the `-FilePath` parameter will dot-source a scriptblock from the file, and set it as the route's script.
+
+For example, to create a route from a file that will write a simple JSON response on a route:
+
+* File.ps1
+```powershell
+{
+    Write-PodeJsonResponse -Value @{ 'value' = 'pong'; }
+}
+```
+
+* Route
+```powershell
+Add-PodeRoute -Method Get -Path '/ping' -FilePath './Routes/File.ps1'
+```
+
+## Getting Routes
+
+There are two helper function that allow you get retrieve a list of routes, and filter routes as well: [`Get-PodeRoute`](../../../Functions/Routes/Get-PodeRoute) and [`Get-PodeStaticRoute`](../../../Functions/Routes/Get-PodeStaticRoute).
+
+You can use these functions to retrieve all routes, or routes for a specific HTTP method, path, endpoint, etc.
+
+To retrieve all routes, you can call the functions with no parameters. To filter, here are some examples:
+
+```powershell
+# all routes for method
+Get-PodeRoute -Method Get
+
+# all routes for a Path
+Get-PodeRoute -Path '/users'
+
+# all routes for an Endpoint by name
+Get-PodeRoute -EndpointName Admin
+```
+
+The [`Get-PodeStaticRoute`](../../../Functions/Routes/Get-PodeStaticRoute) function works in the same way as above - but with no `-Method` parameter.
+
+## Route Object
+
+!!! warning
+    Be careful if you choose to edit these objects, as they will affect the server.
+
+The following is the structure of the Route object internally, as well as the object that is returned from `Add-PodeRoute -PassThru` or [`Get-PodeRoute`](../../../Functions/Routes/Get-PodeRoute):
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| Arguments | object[] | Array of arguments that are splatted onto the route's scriptblock (after the web event) |
+| ContentType | string | The content type to use when parsing the payload in the request |
+| Endpoint | hashtable | Contains the Address, Protocol, and Name of the Endpoint the route is bound to |
+| ErrorType | string | Content type of the error page to use for the route |
+| IsStatic | bool | Fixed to false for normal routes |
+| Logic | scriptblock | The main scriptblock logic of the route |
+| Method | string | HTTP method of the route |
+| Metrics | hashtable | Metrics for the route, such as Request counts |
+| Middleware | hashtable[] | Array of middleware that runs prior to the route's scriptblock |
+| OpenApi | hashtable[] | The OpenAPI definition/settings for the route |
+| Path | string | The path of the route - this path will have regex in place of route parameters |
+| TransferEncoding | string | The transfer encoding to use when parsing the payload in the request |
+
+Static routes have a slightly different format:
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| ContentType | string | Content type to use when parsing the payload a request to the route |
+| Defaults | string[] | Array of default file names to render if path in request is a folder |
+| Download | bool | Specifies whether files are rendered in the response, or downloaded |
+| Endpoint | hashtable | Contains the Address, Protocol, and Name of the Endpoint the route is bound to |
+| ErrorType | string | Content type of the error page to use for the route |
+| IsStatic | bool | Fixed to true for static routes |
+| Method | string | HTTP method of the route |
+| Metrics | hashtable | Metrics for the route, such as Request counts |
+| Middleware | hashtable[] | Array of middleware that runs prior to the route's scriptblock |
+| OpenApi | hashtable[] | The OpenAPI definition/settings for the route |
+| Path | string | The path of the route - this path will have regex in place of dynamic file names |
+| Source | string | The source path within the server that is used for the route |
+| TransferEncoding | string | The transfer encoding to use when parsing the payload in the request |

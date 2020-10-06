@@ -1,12 +1,12 @@
 function Start-PodeServiceServer
 {
     # ensure we have service handlers
-    if (Test-IsEmpty (Get-PodeHandler -Type Service)) {
+    if (Test-PodeIsEmpty (Get-PodeHandler -Type Service)) {
         throw 'No Service handlers have been defined'
     }
 
     # state we're running
-    Write-Host "Server looping every $($PodeContext.Server.Interval)secs" -ForegroundColor Yellow
+    Write-PodeHost "Server looping every $($PodeContext.Server.Interval)secs" -ForegroundColor Yellow
 
     # script for the looping server
     $serverScript = {
@@ -23,7 +23,13 @@ function Start-PodeServiceServer
                 $handlers = Get-PodeHandler -Type Service
                 foreach ($name in $handlers.Keys) {
                     $handler = $handlers[$name]
-                    Invoke-PodeScriptBlock -ScriptBlock $handler.Logic -Arguments (@($ServiceEvent) + @($handler.Arguments)) -Scoped -Splat
+
+                    $_args = @($ServiceEvent) + @($handler.Arguments)
+                    if ($null -ne $handler.UsingVariables) {
+                        $_args = @($handler.UsingVariables.Value) + $_args
+                    }
+
+                    Invoke-PodeScriptBlock -ScriptBlock $handler.Logic -Arguments $_args -Scoped -Splat
                 }
 
                 # sleep before next run

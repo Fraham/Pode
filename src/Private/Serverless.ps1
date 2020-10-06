@@ -36,15 +36,23 @@ function Start-PodeAzFuncServer
                 Lockable = $PodeContext.Lockable
                 Method = $request.Method.ToLowerInvariant()
                 Query = $request.Query
-                Protocol = ($request.Url -split '://')[0]
-                Endpoint = ((Get-PodeHeader -Name 'host') -split ':')[0]
-                ContentType = (Get-PodeHeader -Name 'content-type')
+                Endpoint = @{
+                    Protocol = ($request.Url -split '://')[0]
+                    Address = $null
+                }
+                ContentType = $null
                 ErrorType = $null
                 Cookies = @{}
                 PendingCookies = @{}
                 Path = [string]::Empty
                 Streamed = $false
+                Route = $null
+                StaticContent = $null
+                Timestamp = [datetime]::UtcNow
             }
+
+            $WebEvent.Endpoint.Address = ((Get-PodeHeader -Name 'host') -split ':')[0]
+            $WebEvent.ContentType = (Get-PodeHeader -Name 'content-type')
 
             # set the path, using static content query parameter if passed
             if (![string]::IsNullOrWhiteSpace($request.Query['static-file'])) {
@@ -54,26 +62,37 @@ function Start-PodeAzFuncServer
                 $WebEvent.Path = "/api/$($Data.sys.MethodName)"
             }
 
+            $WebEvent.Path = [System.Web.HttpUtility]::UrlDecode($WebEvent.Path)
+
             # set pode in server response header
             Set-PodeServerHeader -Type 'Kestrel'
 
-            # invoke middleware
+            # invoke global and route middleware
             if ((Invoke-PodeMiddleware -WebEvent $WebEvent -Middleware $PodeContext.Server.Middleware -Route $WebEvent.Path)) {
-                # get the route logic
-                $route = Get-PodeRoute -Method $WebEvent.Method -Route $WebEvent.Path -Protocol $WebEvent.Protocol `
-                    -Endpoint $WebEvent.Endpoint -CheckWildMethod
-
-                # invoke route and custom middleware
-                if ((Invoke-PodeMiddleware -WebEvent $WebEvent -Middleware $route.Middleware)) {
-                    if ($null -ne $route.Logic) {
-                        Invoke-PodeScriptBlock -ScriptBlock $route.Logic -Arguments $WebEvent -Scoped
+                if ((Invoke-PodeMiddleware -WebEvent $WebEvent -Middleware $WebEvent.Route.Middleware))
+                {
+                    # invoke the route
+                    if ($null -ne $WebEvent.StaticContent) {
+                        if ($WebEvent.StaticContent.IsDownload) {
+                            Set-PodeResponseAttachment -Path $e.Path
+                        }
+                        else {
+                            $cachable = $WebEvent.StaticContent.IsCachable
+                            Write-PodeFileResponse -Path $WebEvent.StaticContent.Source -MaxAge $PodeContext.Server.Web.Static.Cache.MaxAge -Cache:$cachable
+                        }
+                    }
+                    else {
+                        Invoke-PodeScriptBlock -ScriptBlock $WebEvent.Route.Logic -Arguments $WebEvent -Scoped
                     }
                 }
             }
         }
         catch {
+            $_ | Write-PodeErrorLog
             Set-PodeResponseStatus -Code 500 -Exception $_
-            Write-Host $Error[0]
+        }
+        finally {
+            Update-PodeServerRequestMetrics -WebEvent $WebEvent
         }
 
         # invoke endware specifc to the current web event
@@ -84,7 +103,7 @@ function Start-PodeAzFuncServer
         Push-OutputBinding -Name Response -Value $response
     }
     catch {
-        Write-Host $Error[0]
+        $_ | Write-PodeErrorLog
         throw $_.Exception
     }
 }
@@ -127,38 +146,56 @@ function Start-PodeAwsLambdaServer
                 Response = $response
                 Request = $request
                 Lockable = $PodeContext.Lockable
-                Path = $request.path
+                Path = [System.Web.HttpUtility]::UrlDecode($request.path)
                 Method = $request.httpMethod.ToLowerInvariant()
                 Query = $request.queryStringParameters
-                Protocol = (Get-PodeHeader -Name 'X-Forwarded-Proto')
-                Endpoint = ((Get-PodeHeader -Name 'Host') -split ':')[0]
-                ContentType = (Get-PodeHeader -Name 'Content-Type')
+                Endpoint = @{
+                    Protocol = $null
+                    Address = $null
+                }
+                ContentType = $null
                 ErrorType = $null
                 Cookies = @{}
                 PendingCookies = @{}
                 Streamed = $false
+                Route = $null
+                StaticContent = $null
+                Timestamp = [datetime]::UtcNow
             }
+
+            $WebEvent.Endpoint.Protocol = (Get-PodeHeader -Name 'X-Forwarded-Proto')
+            $WebEvent.Endpoint.Address = ((Get-PodeHeader -Name 'Host') -split ':')[0]
+            $WebEvent.ContentType = (Get-PodeHeader -Name 'Content-Type')
 
             # set pode in server response header
             Set-PodeServerHeader -Type 'Lambda'
 
-            # invoke middleware
+            # invoke global and route middleware
             if ((Invoke-PodeMiddleware -WebEvent $WebEvent -Middleware $PodeContext.Server.Middleware -Route $WebEvent.Path)) {
-                # get the route logic
-                $route = Get-PodeRoute -Method $WebEvent.Method -Route $WebEvent.Path -Protocol $WebEvent.Protocol `
-                    -Endpoint $WebEvent.Endpoint -CheckWildMethod
-
-                # invoke route and custom middleware
-                if ((Invoke-PodeMiddleware -WebEvent $WebEvent -Middleware $route.Middleware)) {
-                    if ($null -ne $route.Logic) {
-                        Invoke-PodeScriptBlock -ScriptBlock $route.Logic -Arguments $WebEvent -Scoped
+                if ((Invoke-PodeMiddleware -WebEvent $WebEvent -Middleware $WebEvent.Route.Middleware))
+                {
+                    # invoke the route
+                    if ($null -ne $WebEvent.StaticContent) {
+                        if ($WebEvent.StaticContent.IsDownload) {
+                            Set-PodeResponseAttachment -Path $e.Path
+                        }
+                        else {
+                            $cachable = $WebEvent.StaticContent.IsCachable
+                            Write-PodeFileResponse -Path $WebEvent.StaticContent.Source -MaxAge $PodeContext.Server.Web.Static.Cache.MaxAge -Cache:$cachable
+                        }
+                    }
+                    else {
+                        Invoke-PodeScriptBlock -ScriptBlock $WebEvent.Route.Logic -Arguments $WebEvent -Scoped
                     }
                 }
             }
         }
         catch {
+            $_ | Write-PodeErrorLog
             Set-PodeResponseStatus -Code 500 -Exception $_
-            Write-Host $Error[0]
+        }
+        finally {
+            Update-PodeServerRequestMetrics -WebEvent $WebEvent
         }
 
         # invoke endware specifc to the current web event
@@ -177,7 +214,7 @@ function Start-PodeAwsLambdaServer
         } | ConvertTo-Json -Depth 10 -Compress) 
     }
     catch {
-        Write-Host $Error[0]
+        $_ | Write-PodeErrorLog
         throw $_.Exception
     }
 }

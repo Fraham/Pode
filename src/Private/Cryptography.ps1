@@ -42,6 +42,19 @@ function Invoke-PodeSHA1Hash
     return [System.Convert]::ToBase64String($crypto.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($Value)))
 }
 
+function Invoke-PodeMD5Hash
+{
+    param (
+        [Parameter(Mandatory=$true)]
+        [ValidateNotNullOrEmpty()]
+        [string]
+        $Value
+    )
+
+    $crypto = [System.Security.Cryptography.MD5]::Create()
+    return [System.BitConverter]::ToString($crypto.ComputeHash([System.Text.Encoding]::ASCII.GetBytes($Value))).Replace('-', '').ToLowerInvariant()
+}
+
 function Get-PodeRandomBytes
 {
     param (
@@ -78,15 +91,80 @@ function New-PodeGuid
         $Length = 16,
 
         [switch]
-        $Secure
+        $Secure,
+
+        [switch]
+        $NoDashes
     )
 
     # generate a cryptographically secure guid
     if ($Secure) {
         $bytes = [byte[]](Get-PodeRandomBytes -Length $Length)
-        return ([guid]::new($bytes)).ToString()
+        $guid = ([guid]::new($bytes)).ToString()
     }
 
     # return a normal guid
-    return ([guid]::NewGuid()).ToString()
+    else {
+        $guid = ([guid]::NewGuid()).ToString()
+    }
+
+    if ($NoDashes) {
+        $guid = ($guid -ireplace '-', '')
+    }
+
+    return $guid
+}
+
+function Invoke-PodeValueSign
+{
+    param (
+        [Parameter(Mandatory=$true, ValueFromPipeline=$true)]
+        [ValidateNotNullOrEmpty()]
+        [string]
+        $Value,
+
+        [Parameter(Mandatory=$true)]
+        [ValidateNotNullOrEmpty()]
+        [string]
+        $Secret
+    )
+
+    return "s:$($Value).$(Invoke-PodeHMACSHA256Hash -Value $Value -Secret $Secret)"
+}
+
+function Invoke-PodeValueUnsign
+{
+    param (
+        [Parameter(Mandatory=$true, ValueFromPipeline=$true)]
+        [ValidateNotNullOrEmpty()]
+        [string]
+        $Value,
+
+        [Parameter(Mandatory=$true)]
+        [ValidateNotNullOrEmpty()]
+        [string]
+        $Secret
+    )
+
+    # the signed value must start with "s:"
+    if (!$Value.StartsWith('s:')) {
+        return $null
+    }
+
+    # the signed value mised contain a dot - splitting value and signature
+    $Value = $Value.Substring(2)
+    $periodIndex = $Value.LastIndexOf('.')
+    if ($periodIndex -eq -1) {
+        return $null
+    }
+
+    # get the raw value and signature
+    $raw = $Value.Substring(0, $periodIndex)
+    $sig = $Value.Substring($periodIndex + 1)
+
+    if ((Invoke-PodeHMACSHA256Hash -Value $raw -Secret $Secret) -ne $sig) {
+        return $null
+    }
+
+    return $raw
 }

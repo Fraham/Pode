@@ -55,13 +55,13 @@ function Add-PodeAccessRule
 
 <#
 .SYNOPSIS
-Adds rate limiting rules for an IP address.
+Adds rate limiting rules for an IP addresses, Routes, or Endpoints.
 
 .DESCRIPTION
-Adds rate limiting rules for an IP address.
+Adds rate limiting rules for an IP addresses, Routes, or Endpoints.
 
 .PARAMETER Type
-What type of request are we limiting?
+What type of request is being rate limited: IP, Route, or Endpoint?
 
 .PARAMETER Values
 A single, or an array of values.
@@ -73,20 +73,23 @@ The maximum number of requests to allow.
 The number of seconds to count requests before restarting the count.
 
 .PARAMETER Group
-If supplied, groups of IPs in a subnet will be concidered as one IP.
+If supplied, groups of IPs in a subnet will be considered as one IP.
 
 .EXAMPLE
 Add-PodeLimitRule -Type IP -Values '127.0.0.1' -Limit 10 -Seconds 1
 
 .EXAMPLE
 Add-PodeLimitRule -Type IP -Values @('192.168.1.1', '10.10.1.0/24') -Limit 50 -Seconds 1 -Group
+
+.EXAMPLE
+Add-PodeLimitRule -Type Route -Values '/downloads' -Limit 5 -Seconds 1
 #>
 function Add-PodeLimitRule
 {
     [CmdletBinding()]
     param (
         [Parameter(Mandatory=$true)]
-        [ValidateSet('IP')]
+        [ValidateSet('IP', 'Route', 'Endpoint')]
         [string]
         $Type,
 
@@ -106,15 +109,22 @@ function Add-PodeLimitRule
         $Group
     )
 
-    # error if serverless
-    Test-PodeIsServerless -FunctionName 'Add-PodeLimitRule' -ThrowError
-
     # call the appropriate limit method
-    switch ($Type.ToLowerInvariant())
+    foreach ($value in $Values)
     {
-        'ip' {
-            foreach ($ip in $Values) {
-                Add-PodeIPLimit -IP $ip -Limit $Limit -Seconds $Seconds -Group:$Group
+        switch ($Type.ToLowerInvariant())
+        {
+            'ip' {
+                Test-PodeIsServerless -FunctionName 'Add-PodeLimitRule' -ThrowError
+                Add-PodeIPLimit -IP $value -Limit $Limit -Seconds $Seconds -Group:$Group
+            }
+
+            'route' {
+                Add-PodeRouteLimit -Path $value -Limit $Limit -Seconds $Seconds -Group:$Group
+            }
+
+            'endpoint' {
+                Add-PodeEndpointLimit -EndpointName $value -Limit $Limit -Seconds $Seconds -Group:$Group
             }
         }
     }
@@ -128,13 +138,13 @@ Enables Middleware for creating, retrieving and using Sessions within Pode.
 Enables Middleware for creating, retrieving and using Sessions within Pode. With support for defining Session duration, and custom Storage.
 
 .PARAMETER Secret
-A secret to use when signing Session cookies.
+A secret to use when signing Sessions.
 
 .PARAMETER Name
-The name of the cookie Sessions use.
+The name of the cookie/header used for the Session.
 
 .PARAMETER Duration
-The duration a Session cookie should last for, before being expired.
+The duration a Session should last for, before being expired.
 
 .PARAMETER Generator
 A custom ScriptBlock to generate a random unique SessionId. The value returned must be a String.
@@ -143,7 +153,7 @@ A custom ScriptBlock to generate a random unique SessionId. The value returned m
 A custom PSObject that defines methods for Delete, Get, and Set. This allow you to store Sessions in custom Storage such as Redis.
 
 .PARAMETER Extend
-If supplied, the Session's cookie will have its duration extended on each successful Request.
+If supplied, the Sessions will have their durations extended on each successful Request.
 
 .PARAMETER HttpOnly
 If supplied, the Session cookie will only be accessible to browsers.
@@ -151,15 +161,24 @@ If supplied, the Session cookie will only be accessible to browsers.
 .PARAMETER Secure
 If supplied, the Session cookie will only be accessible over HTTPS Requests.
 
+.PARAMETER Strict
+If supplied, the supplie Secret will be extended using the client request's UserAgent and RemoteIPAddress.
+
+.PARAMETER UseHeaders
+If supplied, Sessions will be sent back in a header on the Response with the Name supplied.
+
 .EXAMPLE
 Enable-PodeSessionMiddleware -Secret 'schwifty' -Duration 120
 
 .EXAMPLE
 Enable-PodeSessionMiddleware -Secret 'schwifty' -Duration 120 -Extend -Generator { return [System.IO.Path]::GetRandomFileName() }
+
+.EXAMPLE
+Enable-PodeSessionMiddleware -Secret 'schwifty' -Duration 120 -UseHeaders -Strict
 #>
 function Enable-PodeSessionMiddleware
 {
-    [CmdletBinding()]
+    [CmdletBinding(DefaultParameterSetName='Cookies')]
     param (
         [Parameter(Mandatory=$true)]
         [string]
@@ -192,11 +211,20 @@ function Enable-PodeSessionMiddleware
         [switch]
         $Extend,
 
+        [Parameter(ParameterSetName='Cookies')]
         [switch]
         $HttpOnly,
 
+        [Parameter(ParameterSetName='Cookies')]
         [switch]
-        $Secure
+        $Secure,
+
+        [switch]
+        $Strict,
+
+        [Parameter(ParameterSetName='Headers')]
+        [switch]
+        $UseHeaders
     )
 
     # check that session logic hasn't already been initialised
@@ -205,7 +233,7 @@ function Enable-PodeSessionMiddleware
     }
 
     # ensure the override store has the required methods
-    if (!(Test-IsEmpty $Storage)) {
+    if (!(Test-PodeIsEmpty $Storage)) {
         $members = @($Storage | Get-Member | Select-Object -ExpandProperty Name)
         @('delete', 'get', 'set') | ForEach-Object {
             if ($members -inotcontains $_) {
@@ -215,13 +243,13 @@ function Enable-PodeSessionMiddleware
     }
 
     # if no custom storage, use the inmem one
-    if (Test-IsEmpty $Storage) {
-        $Storage = (Get-PodeSessionCookieInMemStore)
-        Set-PodeSessionCookieInMemClearDown
+    if (Test-PodeIsEmpty $Storage) {
+        $Storage = (Get-PodeSessionInMemStore)
+        Set-PodeSessionInMemClearDown
     }
 
     # set options against server context
-    $PodeContext.Server.Cookies.Session = @{
+    $PodeContext.Server.Sessions = @{
         Name = $Name
         Secret = $Secret
         GenerateId = (Protect-PodeValue -Value $Generator -Default { return (New-PodeGuid) })
@@ -230,67 +258,14 @@ function Enable-PodeSessionMiddleware
             Duration = $Duration
             Extend = $Extend
             Secure = $Secure
+            Strict = $Strict
             HttpOnly = $HttpOnly
+            UseHeaders = $UseHeaders
         }
     }
 
     # return scriptblock for the session middleware
-    $script = {
-        param($e)
-
-        # if session already set, return
-        if ($e.Session) {
-            return $true
-        }
-
-        try
-        {
-            # get the session cookie
-            $_sessionInfo = $PodeContext.Server.Cookies.Session
-            $e.Session = Get-PodeSessionCookie -Name $_sessionInfo.Name -Secret $_sessionInfo.Secret
-
-            # if no session on browser, create a new one
-            if (!$e.Session) {
-                $e.Session = (New-PodeSessionCookie)
-                $new = $true
-            }
-
-            # get the session's data
-            elseif ($null -ne ($data = $_sessionInfo.Store.Get($e.Session.Id))) {
-                $e.Session.Data = $data
-                Set-PodeSessionCookieDataHash -Session $e.Session
-            }
-
-            # session not in store, create a new one
-            else {
-                $e.Session = (New-PodeSessionCookie)
-                $new = $true
-            }
-
-            # add helper methods to session
-            Set-PodeSessionCookieHelpers -Session $e.Session
-
-            # add cookie to response if it's new or extendible
-            if ($new -or $e.Session.Cookie.Extend) {
-                Set-PodeSessionCookie -Session $e.Session
-            }
-
-            # assign endware for session to set cookie/storage
-            $e.OnEnd += @{
-                Logic = {
-                    Save-PodeSession -Force
-                }
-            }
-        }
-        catch {
-            $_ | Write-PodeErrorLog
-            return $false
-        }
-
-        # move along
-        return $true
-    }
-
+    $script = Get-PodeSessionMiddleware
     (New-PodeMiddleware -ScriptBlock $script) | Add-PodeMiddleware -Name '__pode_mw_sessions__'
 }
 
@@ -355,12 +330,58 @@ function Save-PodeSession
     }
 
     # if auth is in use, then assign to session store
-    if (!(Test-IsEmpty $WebEvent.Auth) -and $WebEvent.Auth.Store) {
+    if (!(Test-PodeIsEmpty $WebEvent.Auth) -and $WebEvent.Auth.Store) {
         $WebEvent.Session.Data.Auth = $WebEvent.Auth
     }
 
     # save the session
     Invoke-PodeScriptBlock -ScriptBlock $WebEvent.Session.Save -Arguments @($WebEvent.Session, $Force) -Splat
+}
+
+<#
+.SYNOPSIS
+Returns the currently authenticated SessionId.
+
+.DESCRIPTION
+Returns the currently authenticated SessionId. If there's no session, or it's not authenticated, then null is returned instead.
+You can also have the SessionId returned as signed as well.
+
+.PARAMETER Signed
+If supplied, the returned SessionId will also be signed.
+
+.EXAMPLE
+$sessionId = Get-PodeSessionId
+#>
+function Get-PodeSessionId
+{
+    [CmdletBinding()]
+    param(
+        [switch]
+        $Signed
+    )
+
+    $sessionId = $null
+
+    # only return session if authenticated
+    if (!(Test-PodeIsEmpty $WebEvent.Session.Data.Auth.User) -and $WebEvent.Session.Data.Auth.IsAuthenticated) {
+        $sessionId = $WebEvent.Session.Id
+
+        # do they want the session signed?
+        if ($Signed) {
+            $strict = $PodeContext.Server.Sessions.Info.Strict
+            $secret = $PodeContext.Server.Sessions.Secret
+
+            # covert secret to strict mode
+            if ($strict) {
+                $secret = ConvertTo-PodeSessionStrictSecret -Secret $secret
+            }
+
+            # sign the value if we have a secret
+            $sessionId = (Invoke-PodeValueSign -Value $sessionId -Secret $secret)
+        }
+    }
+
+    return $sessionId
 }
 
 <#
@@ -489,7 +510,7 @@ function Initialize-PodeCsrf
     if ($UseCookies) {
         $Secret = (Protect-PodeValue -Value $Secret -Default (Get-PodeCookieSecret -Global))
 
-        if (Test-IsEmpty $Secret) {
+        if (Test-PodeIsEmpty $Secret) {
             throw "When using cookies for CSRF, a Secret is required. You can either supply a Secret, or set the Cookie global secret - (Set-PodeCookieSecret '<value>' -Global)"
         }
     }
@@ -551,7 +572,7 @@ function Enable-PodeCsrfMiddleware
 
         # if the current route method is ignored, just return
         $ignored = @($PodeContext.Server.Cookies.Csrf.IgnoredMethods)
-        if (!(Test-IsEmpty $ignored) -and ($ignored -icontains $e.Method)) {
+        if (!(Test-PodeIsEmpty $ignored) -and ($ignored -icontains $e.Method)) {
             return $true
         }
 
@@ -608,7 +629,13 @@ function Add-PodeBodyParser
         throw "There is already a body parser defined for the $($ContentType) content-type"
     }
 
-    $PodeContext.Server.BodyParsers[$ContentType] = $ScriptBlock
+    # check if the scriptblock has any using vars
+    $ScriptBlock, $usingVars = Invoke-PodeUsingScriptConversion -ScriptBlock $ScriptBlock -PSSession $PSCmdlet.SessionState
+
+    $PodeContext.Server.BodyParsers[$ContentType] = @{
+        ScriptBlock = $ScriptBlock
+        UsingVariables = $usingVars
+    }
 }
 
 <#

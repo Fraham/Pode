@@ -253,7 +253,25 @@ Describe 'Get-PodeAccessMiddleware' {
         }) | Should Be $true
     }
 
+    It 'Returns a ScriptBlock and invokes it as true, no rule' {
+        $r = Get-PodeAccessMiddleware
+        $r.Name | Should Be '__pode_mw_access__'
+        $r.Logic | Should Not Be $null
+
+        (. $r.Logic @{
+            'Request' = @{ 'RemoteEndPoint' = @{ 'Address' = 'localhost' } }
+        }) | Should Be $true
+    }
+
     It 'Returns a ScriptBlock and invokes it as false' {
+        $PodeContext = @{
+            Server = @{
+                Access = @{
+                    Allow = @{ Key = 'Value' }
+                }
+            }
+        }
+
         $r = Get-PodeAccessMiddleware
         $r.Name | Should Be '__pode_mw_access__'
         $r.Logic | Should Not Be $null
@@ -283,7 +301,25 @@ Describe 'Get-PodeLimitMiddleware' {
         }) | Should Be $true
     }
 
+    It 'Returns a ScriptBlock and invokes it as true, no rules' {
+        $r = Get-PodeLimitMiddleware
+        $r.Name | Should Be '__pode_mw_rate_limit__'
+        $r.Logic | Should Not Be $null
+
+        (. $r.Logic @{
+            'Request' = @{ 'RemoteEndPoint' = @{ 'Address' = 'localhost' } }
+        }) | Should Be $true
+    }
+
     It 'Returns a ScriptBlock and invokes it as false' {
+        $PodeContext = @{
+            Server = @{
+                Limits = @{
+                    Rules = @{ Key = 'Value' }
+                }
+            }
+        }
+
         $r = Get-PodeLimitMiddleware
         $r.Name | Should Be '__pode_mw_rate_limit__'
         $r.Logic | Should Not Be $null
@@ -309,7 +345,9 @@ Describe 'Get-PodeRouteValidateMiddleware' {
         $r.Name | Should Be '__pode_mw_route_validation__'
         $r.Logic | Should Not Be $null
 
-        Mock Get-PodeRoute { return @{ 'Parameters' = @{}; 'Logic' = { Write-Host 'hello' }; } }
+        Mock Find-PodeStaticRoute { return $null }
+        Mock Find-PodeRoute { return @{ 'Parameters' = @{}; 'Logic' = { Write-Host 'hello' }; } }
+
         (. $r.Logic @{
             'Method' = 'GET';
             'Path' = '/';
@@ -328,13 +366,15 @@ Describe 'Get-PodeRouteValidateMiddleware' {
         $r.Name | Should Be '__pode_mw_route_validation__'
         $r.Logic | Should Not Be $null
 
-        Mock Get-PodeRoute { return @{
+        Mock Find-PodeStaticRoute { return $null }
+        Mock Find-PodeRoute { return @{
             'Parameters' = @{};
             'Logic' = { Write-Host 'hello' };
             'ContentType' = 'application/json';
         } }
 
         (. $r.Logic $WebEvent) | Should Be $true
+        $WebEvent.Route | Should Not Be $null
         $WebEvent.ContentType | Should Be 'application/json'
     }
 
@@ -343,12 +383,164 @@ Describe 'Get-PodeRouteValidateMiddleware' {
         $r.Name | Should Be '__pode_mw_route_validation__'
         $r.Logic | Should Not Be $null
 
-        Mock Get-PodeRoute { return $null }
+        Mock Find-PodeStaticRoute { return $null }
+        Mock Find-PodeRoute { return $null }
         Mock Set-PodeResponseStatus { }
+
         (. $r.Logic @{
             'Method' = 'GET';
             'Path' = '/';
         }) | Should Be $false
+    }
+
+    It 'Returns a ScriptBlock, invokes false for no static path' {
+        $r = Get-PodeRouteValidateMiddleware
+        $r.Name | Should Be '__pode_mw_route_validation__'
+        $r.Logic | Should Not Be $null
+
+        Mock Find-PodeStaticRoute { return $null }
+        Mock Find-PodeRoute { return $null }
+        Mock Set-PodeResponseStatus { }
+
+        (. $r.Logic @{
+            'Method' = 'GET';
+            'Path' = '/';
+        }) | Should Be $false
+    }
+
+    It 'Returns a ScriptBlock and invokes it as true, for static content' {
+        $WebEvent = @{
+            Parameters = @{};
+            ContentType = 'text/plain'
+            Method = 'GET'
+            Path = '/'
+        }
+
+        $r = Get-PodeRouteValidateMiddleware
+        $r.Name | Should Be '__pode_mw_route_validation__'
+        $r.Logic | Should Not Be $null
+
+        Mock Find-PodeStaticRoute { return @{ Content = @{ Source = '/'; Download = $true }; Route = @{} } }
+        Mock Find-PodeRoute { return $null }
+
+        (. $r.Logic $WebEvent) | Should Be $true
+        $WebEvent.Route | Should Not Be $null
+        $WebEvent.StaticContent | Should Not Be $null
+        $WebEvent.StaticContent.Download | Should Be $true
+    }
+
+    It 'Returns a ScriptBlock, invokes false for static path, with no caching' {
+        $WebEvent = @{
+            Parameters = @{};
+            ContentType = 'text/plain'
+            Method = 'GET'
+            Path = '/'
+        }
+
+        $r = Get-PodeRouteValidateMiddleware
+        $r.Name | Should Be '__pode_mw_route_validation__'
+        $r.Logic | Should Not Be $null
+
+        $PodeContext = @{ 'Server' = @{
+            'Web' = @{ 'Static' = @{
+                'Cache' = @{
+                    'Enabled' = $false
+                }
+            }}
+        }}
+
+        Mock Find-PodeStaticRoute { return @{ Content = @{ Source = '/' }; Route = @{} } }
+        Mock Find-PodeRoute { return $null }
+
+        (. $r.Logic $WebEvent) | Should Be $true
+        $WebEvent.Route | Should Not Be $null
+        $WebEvent.StaticContent | Should Not Be $null
+    }
+
+    It 'Returns a ScriptBlock, invokes false for static path, with no caching from exclude' {
+        $WebEvent = @{
+            Parameters = @{};
+            ContentType = 'text/plain'
+            Method = 'GET'
+            Path = '/'
+        }
+
+        $r = Get-PodeRouteValidateMiddleware
+        $r.Name | Should Be '__pode_mw_route_validation__'
+        $r.Logic | Should Not Be $null
+
+        $PodeContext = @{ 'Server' = @{
+            'Web' = @{ 'Static' = @{
+                'Cache' = @{
+                    'Enabled' = $true;
+                    'Exclude' = '/'
+                }
+            }}
+        }}
+
+        Mock Find-PodeStaticRoute { return @{ Content = @{ Source = '/' }; Route = @{} } }
+        Mock Find-PodeRoute { return $null }
+
+        (. $r.Logic $WebEvent) | Should Be $true
+        $WebEvent.Route | Should Not Be $null
+        $WebEvent.StaticContent | Should Not Be $null
+    }
+
+    It 'Returns a ScriptBlock, invokes false for static path, with no caching from include' {
+        $WebEvent = @{
+            Parameters = @{};
+            ContentType = 'text/plain'
+            Method = 'GET'
+            Path = '/'
+        }
+
+        $r = Get-PodeRouteValidateMiddleware
+        $r.Name | Should Be '__pode_mw_route_validation__'
+        $r.Logic | Should Not Be $null
+
+        $PodeContext = @{ 'Server' = @{
+            'Web' = @{ 'Static' = @{
+                'Cache' = @{
+                    'Enabled' = $true;
+                    'Include' = '/route'
+                }
+            }}
+        }}
+
+        Mock Find-PodeStaticRoute { return @{ Content = @{ Source = '/' }; Route = @{} } }
+        Mock Find-PodeRoute { return $null }
+
+        (. $r.Logic $WebEvent) | Should Be $true
+        $WebEvent.Route | Should Not Be $null
+        $WebEvent.StaticContent | Should Not Be $null
+    }
+
+    It 'Returns a ScriptBlock, invokes false for static path, with caching' {
+        $WebEvent = @{
+            Parameters = @{};
+            ContentType = 'text/plain'
+            Method = 'GET'
+            Path = '/'
+        }
+
+        $r = Get-PodeRouteValidateMiddleware
+        $r.Name | Should Be '__pode_mw_route_validation__'
+        $r.Logic | Should Not Be $null
+
+        $PodeContext = @{ 'Server' = @{
+            'Web' = @{ 'Static' = @{
+                'Cache' = @{
+                    'Enabled' = $true;
+                }
+            }}
+        }}
+
+        Mock Find-PodeStaticRoute { return @{ Content = @{ Source = '/' }; Route = @{} } }
+        Mock Find-PodeRoute { return $null }
+
+        (. $r.Logic $WebEvent) | Should Be $true
+        $WebEvent.Route | Should Not Be $null
+        $WebEvent.StaticContent | Should Not Be $null
     }
 }
 
@@ -395,7 +587,7 @@ Describe 'Get-PodeQueryMiddleware' {
 
         Mock ConvertFrom-PodeNameValueToHashTable { return 'string' }
         (. $r.Logic @{
-            'Request' = @{ 'QueryString' = 'name=bob' }
+            'Request' = @{ 'QueryString' = [System.Web.HttpUtility]::ParseQueryString('name=bob') }
         }) | Should Be $true
     }
 
@@ -423,13 +615,13 @@ Describe 'Get-PodePublicMiddleware' {
         $r.Name | Should Be '__pode_mw_static_content__'
         $r.Logic | Should Not Be $null
 
-        Mock Get-PodeStaticRoutePath { return @{ 'Path' = $null } }
+        Mock Find-PodePublicRoute { return $null }
         (. $r.Logic @{
             'Path' = '/'; 'Protocol' = 'http'; 'Endpoint' = '';
         }) | Should Be $true
     }
 
-    It 'Returns a ScriptBlock, invokes false for static path, flagged as download' {
+    It 'Returns a ScriptBlock, invokes false for static path' {
         $r = Get-PodePublicMiddleware
         $r.Name | Should Be '__pode_mw_static_content__'
         $r.Logic | Should Not Be $null
@@ -438,13 +630,14 @@ Describe 'Get-PodePublicMiddleware' {
             'Web' = @{ 'Static' = @{ } }
         }}
 
-        Mock Get-PodeStaticRoutePath { return @{ 'Path' = '/'; 'Download' = $true } }
-        Mock Set-PodeResponseAttachment { }
+        Mock Find-PodePublicRoute { return '/' }
+        Mock Write-PodeFileResponse { }
+
         (. $r.Logic @{
             'Path' = '/'; 'Protocol' = 'http'; 'Endpoint' = '';
         }) | Should Be $false
 
-        Assert-MockCalled Set-PodeResponseAttachment -Times 1 -Scope It
+        Assert-MockCalled Write-PodeFileResponse -Times 1 -Scope It
     }
 
     It 'Returns a ScriptBlock, invokes false for static path, with no caching' {
@@ -460,8 +653,9 @@ Describe 'Get-PodePublicMiddleware' {
             }}
         }}
 
-        Mock Get-PodeStaticRoutePath { return @{ 'Path' = '/' } }
+        Mock Find-PodePublicRoute { return '/' }
         Mock Write-PodeFileResponse { }
+
         (. $r.Logic @{
             'Path' = '/'; 'Protocol' = 'http'; 'Endpoint' = '';
         }) | Should Be $false
@@ -483,8 +677,9 @@ Describe 'Get-PodePublicMiddleware' {
             }}
         }}
 
-        Mock Get-PodeStaticRoutePath { return @{ 'Path' = '/' } }
+        Mock Find-PodePublicRoute { return '/' }
         Mock Write-PodeFileResponse { }
+
         (. $r.Logic @{
             'Path' = '/'; 'Protocol' = 'http'; 'Endpoint' = '';
         }) | Should Be $false
@@ -506,8 +701,9 @@ Describe 'Get-PodePublicMiddleware' {
             }}
         }}
 
-        Mock Get-PodeStaticRoutePath { return @{ 'Path' = '/' } }
+        Mock Find-PodePublicRoute { return '/' }
         Mock Write-PodeFileResponse { }
+
         (. $r.Logic @{
             'Path' = '/'; 'Protocol' = 'http'; 'Endpoint' = '';
         }) | Should Be $false
@@ -528,8 +724,9 @@ Describe 'Get-PodePublicMiddleware' {
             }}
         }}
 
-        Mock Get-PodeStaticRoutePath { return @{ 'Path' = '/' } }
+        Mock Find-PodePublicRoute { return '/' }
         Mock Write-PodeFileResponse { }
+
         (. $r.Logic @{
             'Path' = '/'; 'Protocol' = 'http'; 'Endpoint' = '';
         }) | Should Be $false

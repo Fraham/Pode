@@ -20,7 +20,7 @@
     Author = 'Matthew Kelly (Badgerati)'
 
     # Copyright statement for this module
-    Copyright = 'Copyright (c) 2017-2019 Matthew Kelly (Badgerati), licensed under the MIT License.'
+    Copyright = 'Copyright (c) 2017-2020 Matthew Kelly (Badgerati), licensed under the MIT License.'
 
     # Description of the functionality provided by this module
     Description = 'A Cross-Platform PowerShell framework for creating web servers to host REST APIs and Websites. Pode also has support for being used in Azure Functions and AWS Lambda.'
@@ -29,7 +29,11 @@
     PowerShellVersion = '5.0'
 
     # Assemblies that must be loaded prior to importing this module
-    RequiredAssemblies = @('System.Web', 'System.Net.Http')
+    RequiredAssemblies = @(
+        'System.Web',
+        'System.Net.Http',
+        './Libs/Pode.dll'
+    )
 
     # Functions to export from this Module
     FunctionsToExport = @(
@@ -56,6 +60,7 @@
         'Test-PodeHeader',
         'Get-PodeHeader',
         'Set-PodeHeader',
+        'Test-PodeHeaderSigned',
 
         # state
         'Set-PodeState',
@@ -95,14 +100,18 @@
         'Get-PodeConfig',
         'Add-PodeEndware',
         'Import-PodeModule',
+        'Import-PodeSnapIn',
         'Protect-PodeValue',
         'Resolve-PodeValue',
         'Invoke-PodeScriptBlock',
-        'Test-IsUnix',
-        'Test-IsWindows',
-        'Test-IsPSCore',
-        'Test-IsEmpty',
+        'Test-PodeIsUnix',
+        'Test-PodeIsWindows',
+        'Test-PodeIsPSCore',
+        'Test-PodeIsEmpty',
         'Out-PodeHost',
+        'Write-PodeHost',
+        'Test-PodeIsIIS',
+        'Test-PodeIsHeroku',
 
         # routes
         'Add-PodeRoute',
@@ -113,6 +122,8 @@
         'Clear-PodeStaticRoutes',
         'ConvertTo-PodeRoute',
         'Add-PodePage',
+        'Get-PodeRoute',
+        'Get-PodeStaticRoute',
 
         # handlers
         'Add-PodeHandler',
@@ -124,12 +135,18 @@
         'Remove-PodeSchedule',
         'Clear-PodeSchedule',
         'Invoke-PodeSchedule',
+        'Edit-PodeSchedule',
+        'Set-PodeScheduleConcurrency',
+        'Get-PodeSchedule',
+        'Get-PodeScheduleNextTrigger',
 
         # timers
         'Add-PodeTimer',
         'Remove-PodeTimer',
         'Clear-PodeTimers',
         'Invoke-PodeTimer',
+        'Edit-PodeTimer',
+        'Get-PodeTimer',
 
         # middleware
         'Add-PodeMiddleware',
@@ -144,13 +161,16 @@
         'Enable-PodeCsrfMiddleware',
         'Remove-PodeSession',
         'Save-PodeSession',
+        'Get-PodeSessionId',
 
         # auth
-        'New-PodeAuthType',
+        'New-PodeAuthScheme',
         'Add-PodeAuth',
         'Add-PodeAuthWindowsAd',
         'Remove-PodeAuth',
-        'Get-PodeAuthMiddleware',
+        'Add-PodeAuthMiddleware',
+        'Add-PodeAuthIIS',
+        'Add-PodeAuthUserFile',
 
         # logging
         'New-PodeLoggingMethod',
@@ -167,9 +187,42 @@
 
         # core
         'Start-PodeServer',
+        'Close-PodeServer',
+        'Start-PodeStaticServer',
         'Show-PodeGui',
         'Add-PodeEndpoint',
-        'Pode'
+        'Get-PodeEndpoint',
+        'Pode',
+
+        # openapi
+        'Enable-PodeOpenApi',
+        'Get-PodeOpenApiDefinition',
+        'Add-PodeOAResponse',
+        'Remove-PodeOAResponse',
+        'Add-PodeOAComponentResponse',
+        'Set-PodeOARequest',
+        'New-PodeOARequestBody',
+        'Add-PodeOAComponentSchema',
+        'Add-PodeOAComponentRequestBody',
+        'Add-PodeOAComponentParameter',
+        'New-PodeOAIntProperty',
+        'New-PodeOANumberProperty',
+        'New-PodeOAStringProperty',
+        'New-PodeOABoolProperty',
+        'New-PodeOAObjectProperty',
+        'ConvertTo-PodeOAParameter',
+        'Set-PodeOARouteInfo',
+        'Enable-PodeOpenApiViewer',
+
+        # Metrics
+        'Get-PodeServerUptime',
+        'Get-PodeServerRestartCount',
+        'Get-PodeServerRequestMetric',
+
+        # AutoImport
+        'Export-PodeModule',
+        'Export-PodeSnapin',
+        'Export-PodeFunction'
     )
 
     # Private data to pass to the module specified in RootModule/ModuleToProcess. This may also contain a PSData hashtable with additional module metadata used by PowerShell.
@@ -181,7 +234,7 @@
                 'powershell-core', 'windows', 'unix', 'linux', 'pode', 'PSEdition_Core', 'cross-platform', 'access-control',
                 'file-monitoring', 'multithreaded', 'rate-limiting', 'cron', 'schedule', 'middleware', 'session',
                 'authentication', 'active-directory', 'caching', 'csrf', 'arm', 'raspberry-pi', 'aws-lambda',
-                'azure-functions', 'websockets')
+                'azure-functions', 'websockets', 'swagger', 'openapi', 'redoc')
 
             # A URL to the license for this module.
             LicenseUri = 'https://raw.githubusercontent.com/Badgerati/Pode/master/LICENSE.txt'

@@ -17,6 +17,12 @@ The File Path of where to store the logs.
 .PARAMETER Name
 The File Name to prepend new log files using.
 
+.PARAMETER Batch
+An optional batch size to write log items in bulk (Default: 1)
+
+.PARAMETER BatchTimeout
+An optional batch timeout, in seconds, to send items off for writing if a log item isn't received (Default: 0)
+
 .PARAMETER MaxDays
 The maximum number of days to keep logs, before Pode automatically removes them.
 
@@ -62,6 +68,14 @@ function New-PodeLoggingMethod
         [string]
         $Name,
 
+        [Parameter()]
+        [int]
+        $Batch = 1,
+
+        [Parameter()]
+        [int]
+        $BatchTimeout = 0,
+
         [Parameter(ParameterSetName='File')]
         [ValidateScript({
             if ($_ -lt 0) {
@@ -90,7 +104,7 @@ function New-PodeLoggingMethod
 
         [Parameter(Mandatory=$true, ParameterSetName='Custom')]
         [ValidateScript({
-            if (Test-IsEmpty $_) {
+            if (Test-PodeIsEmpty $_) {
                 throw "A non-empty ScriptBlock is required for the Custom logging output method"
             }
 
@@ -104,10 +118,20 @@ function New-PodeLoggingMethod
         $ArgumentList
     )
 
+    # batch details
+    $batchInfo = @{
+        Size = $Batch
+        Timeout = $BatchTimeout
+        LastUpdate = $null
+        Items = @()
+    }
+
+    # return info on appropriate logging type
     switch ($PSCmdlet.ParameterSetName.ToLowerInvariant()) {
         'terminal' {
             return @{
                 ScriptBlock = (Get-PodeLoggingTerminalMethod)
+                Batch = $batchInfo
                 Arguments = @{}
             }
         }
@@ -119,6 +143,7 @@ function New-PodeLoggingMethod
 
             return @{
                 ScriptBlock = (Get-PodeLoggingFileMethod)
+                Batch = $batchInfo
                 Arguments = @{
                     Name = $Name
                     Path = $Path
@@ -132,8 +157,12 @@ function New-PodeLoggingMethod
         }
 
         'custom' {
+            $ScriptBlock, $usingVars = Invoke-PodeUsingScriptConversion -ScriptBlock $ScriptBlock -PSSession $PSCmdlet.SessionState
+
             return @{
                 ScriptBlock = $ScriptBlock
+                UsingVariables = $usingVars
+                Batch = $batchInfo
                 Arguments = $ArgumentList
             }
         }
@@ -179,7 +208,7 @@ function Enable-PodeRequestLogging
     }
 
     # ensure the Method contains a scriptblock
-    if (Test-IsEmpty $Method.ScriptBlock) {
+    if (Test-PodeIsEmpty $Method.ScriptBlock) {
         throw "The supplied output Method for Request Logging requires a valid ScriptBlock"
     }
 
@@ -256,7 +285,7 @@ function Enable-PodeErrorLogging
     }
 
     # ensure the Method contains a scriptblock
-    if (Test-IsEmpty $Method.ScriptBlock) {
+    if (Test-PodeIsEmpty $Method.ScriptBlock) {
         throw "The supplied output Method for Error Logging requires a valid ScriptBlock"
     }
 
@@ -325,7 +354,7 @@ function Add-PodeLogger
 
         [Parameter(Mandatory=$true)]
         [ValidateScript({
-            if (Test-IsEmpty $_) {
+            if (Test-PodeIsEmpty $_) {
                 throw "A non-empty ScriptBlock is required for the logging method"
             }
 
@@ -345,14 +374,18 @@ function Add-PodeLogger
     }
 
     # ensure the Method contains a scriptblock
-    if (Test-IsEmpty $Method.ScriptBlock) {
+    if (Test-PodeIsEmpty $Method.ScriptBlock) {
         throw "The supplied output Method for the '$($Name)' Logging method requires a valid ScriptBlock"
     }
+
+    # check if the scriptblock has any using vars
+    $ScriptBlock, $usingVars = Invoke-PodeUsingScriptConversion -ScriptBlock $ScriptBlock -PSSession $PSCmdlet.SessionState
 
     # add logging method to server
     $PodeContext.Server.Logging.Types[$Name] = @{
         Method = $Method
         ScriptBlock = $ScriptBlock
+        UsingVariables = $usingVars
         Arguments = $ArgumentList
     }
 }
@@ -562,7 +595,7 @@ function Protect-PodeLogItem
     )
 
     # do nothing if there are no masks
-    if (Test-IsEmpty $PodeContext.Server.Logging.Masking.Patterns) {
+    if (Test-PodeIsEmpty $PodeContext.Server.Logging.Masking.Patterns) {
         return $item
     }
 

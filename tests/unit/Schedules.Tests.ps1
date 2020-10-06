@@ -2,26 +2,26 @@ $path = $MyInvocation.MyCommand.Path
 $src = (Split-Path -Parent -Path $path) -ireplace '[\\/]tests[\\/]unit', '/src/'
 Get-ChildItem "$($src)/*.ps1" -Recurse | Resolve-Path | ForEach-Object { . $_ }
 
-Describe 'Get-PodeSchedule' {
+Describe 'Find-PodeSchedule' {
     Context 'Invalid parameters supplied' {
         It 'Throw null name parameter error' {
-            { Get-PodeSchedule -Name $null } | Should Throw 'The argument is null or empty'
+            { Find-PodeSchedule -Name $null } | Should Throw 'The argument is null or empty'
         }
 
         It 'Throw empty name parameter error' {
-            { Get-PodeSchedule -Name ([string]::Empty) } | Should Throw 'The argument is null or empty'
+            { Find-PodeSchedule -Name ([string]::Empty) } | Should Throw 'The argument is null or empty'
         }
     }
 
     Context 'Valid values supplied' {
         It 'Returns null as the schedule does not exist' {
             $PodeContext = @{ 'Schedules' = @{}; }
-            Get-PodeSchedule -Name 'test' | Should Be $null
+            Find-PodeSchedule -Name 'test' | Should Be $null
         }
 
         It 'Returns schedule for name' {
             $PodeContext = @{ 'Schedules' = @{ 'test' = @{ 'Name' = 'test'; }; }; }
-            $result = (Get-PodeSchedule -Name 'test')
+            $result = (Find-PodeSchedule -Name 'test')
 
             $result | Should BeOfType System.Collections.Hashtable
             $result.Name | Should Be 'test'
@@ -31,6 +31,7 @@ Describe 'Get-PodeSchedule' {
 
 Describe 'Add-PodeSchedule' {
     Mock 'ConvertFrom-PodeCronExpression' { @{} }
+    Mock 'Get-PodeCronNextEarliestTrigger' { [datetime]::new(2020, 1, 1) }
 
     It 'Throws error because schedule already exists' {
         $PodeContext = @{ 'Schedules' = @{ 'test' = $null }; }
@@ -132,6 +133,158 @@ Describe 'Add-PodeSchedule' {
     }
 }
 
+Describe 'Get-PodeSchedule' {
+    It 'Returns no schedules' {
+        $PodeContext = @{ Schedules = @{} }
+        $schedules = Get-PodeSchedule
+        $schedules.Length | Should Be 0
+    }
+
+    It 'Returns 1 schedule by name' {
+        $PodeContext = @{ Schedules = @{} }
+        $start = ([DateTime]::Now.AddHours(3))
+        $end = ([DateTime]::Now.AddHours(5))
+
+        Add-PodeSchedule -Name 'test1' -Cron '@hourly' -ScriptBlock { Write-Host 'hello' } -StartTime $start -EndTime $end
+        $schedules = Get-PodeSchedule
+        $schedules.Length | Should Be 1
+
+        $schedules.Name | Should Be 'test1'
+        $schedules.StartTime | Should Be $start
+        $schedules.EndTime | Should Be $end
+        $schedules.Limit | Should Be 0
+    }
+
+    It 'Returns 1 schedule by start time' {
+        $PodeContext = @{ Schedules = @{} }
+        $start = ([DateTime]::Now.AddHours(3))
+        $end = ([DateTime]::Now.AddHours(5))
+
+        Add-PodeSchedule -Name 'test1' -Cron '@hourly' -ScriptBlock { Write-Host 'hello' } -StartTime $start -EndTime $end
+        $schedules = Get-PodeSchedule -StartTime $start.AddHours(1)
+        $schedules.Length | Should Be 1
+
+        $schedules.Name | Should Be 'test1'
+        $schedules.StartTime | Should Be $start
+        $schedules.EndTime | Should Be $end
+        $schedules.Limit | Should Be 0
+    }
+
+    It 'Returns 1 schedule by end time' {
+        $PodeContext = @{ Schedules = @{} }
+        $start = ([DateTime]::Now.AddHours(3))
+        $end = ([DateTime]::Now.AddHours(5))
+
+        Add-PodeSchedule -Name 'test1' -Cron '@hourly' -ScriptBlock { Write-Host 'hello' } -StartTime $start -EndTime $end
+        $schedules = Get-PodeSchedule -EndTime $end
+        $schedules.Length | Should Be 1
+
+        $schedules.Name | Should Be 'test1'
+        $schedules.StartTime | Should Be $start
+        $schedules.EndTime | Should Be $end
+        $schedules.Limit | Should Be 0
+    }
+
+    It 'Returns 1 schedule by both start and end time' {
+        $PodeContext = @{ Schedules = @{} }
+        $start = ([DateTime]::Now.AddHours(3))
+        $end = ([DateTime]::Now.AddHours(5))
+
+        Add-PodeSchedule -Name 'test1' -Cron '@hourly' -ScriptBlock { Write-Host 'hello' } -StartTime $start -EndTime $end
+        $schedules = Get-PodeSchedule -StartTime $start.AddHours(1) -EndTime $end
+        $schedules.Length | Should Be 1
+
+        $schedules.Name | Should Be 'test1'
+        $schedules.StartTime | Should Be $start
+        $schedules.EndTime | Should Be $end
+        $schedules.Limit | Should Be 0
+    }
+
+    It 'Returns no schedules by end time before start' {
+        $PodeContext = @{ Schedules = @{} }
+        $start = ([DateTime]::Now.AddHours(3))
+        $end = ([DateTime]::Now.AddHours(5))
+
+        Add-PodeSchedule -Name 'test1' -Cron '@hourly' -ScriptBlock { Write-Host 'hello' } -StartTime $start -EndTime $end
+        $schedules = Get-PodeSchedule -EndTime $start.AddHours(-1)
+        $schedules.Length | Should Be 0
+    }
+
+    It 'Returns no schedules by start time after end' {
+        $PodeContext = @{ Schedules = @{} }
+        $start = ([DateTime]::Now.AddHours(3))
+        $end = ([DateTime]::Now.AddHours(5))
+
+        Add-PodeSchedule -Name 'test1' -Cron '@hourly' -ScriptBlock { Write-Host 'hello' } -StartTime $start -EndTime $end
+        $schedules = Get-PodeSchedule -StartTime $end.AddHours(1)
+        $schedules.Length | Should Be 0
+    }
+
+    It 'Returns no schedules by where end just before end' {
+        $PodeContext = @{ Schedules = @{} }
+        $start = ([DateTime]::Now.AddHours(3))
+        $end = ([DateTime]::Now.AddHours(5))
+
+        Add-PodeSchedule -Name 'test1' -Cron '@hourly' -ScriptBlock { Write-Host 'hello' } -StartTime $start -EndTime $end
+        $schedules = Get-PodeSchedule -StartTime $start.AddHours(1).AddMinutes(1) -EndTime $end.AddHours(-1).AddMinutes(-1)
+        $schedules.Length | Should Be 0
+    }
+
+    It 'Returns 2 schedules by name' {
+        $PodeContext = @{ Schedules = @{} }
+        $start = ([DateTime]::Now.AddHours(3))
+        $end = ([DateTime]::Now.AddHours(5))
+
+        Add-PodeSchedule -Name 'test1' -Cron '@hourly' -ScriptBlock { Write-Host 'hello' } -StartTime $start -EndTime $end
+        Add-PodeSchedule -Name 'test2' -Cron '@hourly' -ScriptBlock { Write-Host 'hello' } -StartTime $start -EndTime $end
+        Add-PodeSchedule -Name 'test3' -Cron '@hourly' -ScriptBlock { Write-Host 'hello' } -StartTime $start -EndTime $end
+
+        $schedules = Get-PodeSchedule -Name test1, test2
+        $schedules.Length | Should Be 2
+    }
+
+    It 'Returns all schedules' {
+        $PodeContext = @{ Schedules = @{} }
+        $start = ([DateTime]::Now.AddHours(3))
+        $end = ([DateTime]::Now.AddHours(5))
+
+        Add-PodeSchedule -Name 'test1' -Cron '@hourly' -ScriptBlock { Write-Host 'hello' } -StartTime $start -EndTime $end
+        Add-PodeSchedule -Name 'test2' -Cron '@hourly' -ScriptBlock { Write-Host 'hello' } -StartTime $start -EndTime $end
+        Add-PodeSchedule -Name 'test3' -Cron '@hourly' -ScriptBlock { Write-Host 'hello' } -StartTime $start -EndTime $end
+
+        $schedules = Get-PodeSchedule
+        $schedules.Length | Should Be 3
+    }
+}
+
+Describe 'Get-PodeScheduleNextTrigger' {
+    It 'Returns next trigger time' {
+        $PodeContext = @{ Schedules = @{} }
+        $start = ([DateTime]::Now.AddHours(3))
+        $end = ([DateTime]::Now.AddHours(5))
+
+        Add-PodeSchedule -Name 'test1' -Cron '@hourly' -ScriptBlock { Write-Host 'hello' } -StartTime $start -EndTime $end
+        $trigger = Get-PodeScheduleNextTrigger -Name 'test1'
+
+        $expected = $start.AddHours(1)
+        $expected = [datetime]::new($expected.Year, $expected.Month, $expected.Day, $expected.Hour, 0, 0)
+        $trigger | Should Be $expected
+    }
+
+    It 'Returns next trigger time from date' {
+        $PodeContext = @{ Schedules = @{} }
+        $start = ([DateTime]::Now.AddHours(3))
+        $end = ([DateTime]::Now.AddHours(5))
+
+        Add-PodeSchedule -Name 'test1' -Cron '@hourly' -ScriptBlock { Write-Host 'hello' } -StartTime $start -EndTime $end
+        $trigger = Get-PodeScheduleNextTrigger -Name 'test1' -DateTime $start.AddHours(1)
+
+        $expected = $start.AddHours(2)
+        $expected = [datetime]::new($expected.Year, $expected.Month, $expected.Day, $expected.Hour, 0, 0)
+        $trigger | Should Be $expected
+    }
+}
+
 Describe 'Remove-PodeSchedule' {
     It 'Adds new schedule and then removes it' {
         $PodeContext = @{ 'Schedules' = @{}; }
@@ -160,5 +313,29 @@ Describe 'Clear-PodeSchedules' {
         Clear-PodeSchedules
 
         $PodeContext.Schedules.Count | Should Be 0
+    }
+}
+
+Describe 'Edit-PodeSchedule' {
+    It 'Adds a new schedule, then edits the cron' {
+        $PodeContext = @{ 'Schedules' = @{}; }
+        Add-PodeSchedule -Name 'test1' -Cron '@hourly' -ScriptBlock { Write-Host 'hello1' }
+        $PodeContext.Schedules['test1'].Crons.Length | Should Be 1
+        $PodeContext.Schedules['test1'].Script.ToString() | Should Be ({ Write-Host 'hello1' }).ToString()
+
+        Edit-PodeSchedule -Name 'test1' -Cron @('@minutely', '@hourly')
+        $PodeContext.Schedules['test1'].Crons.Length | Should Be 2
+        $PodeContext.Schedules['test1'].Script.ToString() | Should Be ({ Write-Host 'hello1' }).ToString()
+    }
+
+    It 'Adds a new schedule, then edits the script' {
+        $PodeContext = @{ 'Schedules' = @{}; }
+        Add-PodeSchedule -Name 'test1' -Cron '@hourly' -ScriptBlock { Write-Host 'hello1' }
+        $PodeContext.Schedules['test1'].Crons.Length | Should Be 1
+        $PodeContext.Schedules['test1'].Script.ToString() | Should Be ({ Write-Host 'hello1' }).ToString()
+
+        Edit-PodeSchedule -Name 'test1' -ScriptBlock { Write-Host 'hello2' }
+        $PodeContext.Schedules['test1'].Crons.Length | Should Be 1
+        $PodeContext.Schedules['test1'].Script.ToString() | Should Be ({ Write-Host 'hello2' }).ToString()
     }
 }

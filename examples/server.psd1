@@ -21,10 +21,13 @@
                 '/john' = 'application/json'
             }
         }
+        Compression = @{
+            Enable = $false
+        }
     }
     Server = @{
         FileMonitor = @{
-            Enable = $true
+            Enable = $false
             ShowFiles = $true
         }
         Logging = @{
@@ -34,6 +37,11 @@
                     '(?<keep_before>AppleWebKit\/)\d+\.\d+(?(<keep_after)\s+\(KHTML)'
                 )
                 Mask = '--MASKED--'
+            }
+        }
+        AutoImport = @{
+            Functions = @{
+                ExportOnly = $true
             }
         }
     }

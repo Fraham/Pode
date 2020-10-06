@@ -10,19 +10,25 @@ Start-PodeServer {
     Add-PodeEndpoint -Address * -Port 8081 -Protocol Http
 
     # runs forever, looping every 5secs
+    $message = 'Hello, world'
     Add-PodeTimer -Name 'forever' -Interval 5 -ScriptBlock {
-        'Hello, world' | Out-PodeHost
+        '- - -' | Out-PodeHost
+        $using:message | Out-PodeHost
+        '- - -' | Out-PodeHost
     } -Limit 5
+
+    Add-PodeTimer -Name 'from-file' -Interval 2 -FilePath './scripts/timer.ps1'
 
     # runs forever, but skips the first 3 "loops" - is paused for 15secs then loops every 5secs
     Add-PodeTimer -Name 'pause-first-3' -Interval 5 -ScriptBlock {
-        # logic
+        'Skip 3 then run' | Out-PodeHost
     } -Skip 3
 
-    # runs every 5secs, but only runs for 10 "loops" (ie, 50secs)
-    Add-PodeTimer -Name 'run-10-times' -Interval 5 -ScriptBlock {
-        # logic
-    } -Limit 10
+    # runs every 5secs, but only runs for 3 "loops" (ie, 15secs)
+    Add-PodeTimer -Name 'run-3-times' -Interval 5 -ScriptBlock {
+        'Only run 3 times' | Out-PodeHost
+        Get-PodeTimer -Name 'run-3-times' | Out-Default
+    } -Limit 3
 
     # skip the first 2 loops, then run for 15 loops
     Add-PodeTimer -Name 'pause-then-limit' -Interval 5 -ScriptBlock {
@@ -30,8 +36,8 @@ Start-PodeServer {
     } -Skip 2 -Limit 15
 
     # run once after 2mins
-    Add-PodeTimer -Name 'run-once' -Interval 120 -ScriptBlock {
-        # logic
+    Add-PodeTimer -Name 'run-once' -Interval 20 -ScriptBlock {
+        'Ran once' | Out-PodeHost
     } -Skip 1 -Limit 1
 
     # create a new timer via a route

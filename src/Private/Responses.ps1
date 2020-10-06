@@ -21,13 +21,13 @@ function Show-PodeErrorPage
     $errorPage = Find-PodeErrorPage -Code $Code -ContentType $ContentType
 
     # if no page found, return
-    if (Test-IsEmpty $errorPage) {
+    if (Test-PodeIsEmpty $errorPage) {
         return
     }
 
     # if exception trace showing enabled then build the exception details object
     $ex = $null
-    if (!(Test-IsEmpty $Exception) -and $PodeContext.Server.Web.ErrorPages.ShowExceptions) {
+    if (!(Test-PodeIsEmpty $Exception) -and $PodeContext.Server.Web.ErrorPages.ShowExceptions) {
         $ex = @{
             'Message' = [System.Web.HttpUtility]::HtmlEncode($Exception.Exception.Message);
             'StackTrace' = [System.Web.HttpUtility]::HtmlEncode($Exception.ScriptStackTrace);
@@ -57,6 +57,11 @@ function Close-PodeTcpConnection
         [Parameter()]
         $Client,
 
+        [Parameter(ParameterSetName='Quit')]
+        [string]
+        $Message,
+
+        [Parameter(ParameterSetName='Quit')]
         [switch]
         $Quit
     )
@@ -67,7 +72,11 @@ function Close-PodeTcpConnection
 
     if ($null -ne $Client) {
         if ($Quit -and $Client.Connected) {
-            Write-PodeTcpClient -Message '221 Bye'
+            if ([string]::IsNullOrWhiteSpace($Message)) {
+                $Message = '221 Bye'
+            }
+
+            Write-PodeTcpClient -Message $Message
         }
 
         Close-PodeDisposable -Disposable $Client -Close

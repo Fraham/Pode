@@ -13,10 +13,27 @@ function Start-PodeInternalServer
         # setup temp drives for internal dirs
         Add-PodePSInbuiltDrives
 
-        # create the runspace state, execute the server logic, and start the runspaces
+        # create the shared runspace state
         New-PodeRunspaceState
-        Invoke-PodeScriptBlock -ScriptBlock $PodeContext.Server.Logic -NoNewClosure
+
+        # get the server's script and invoke it - to set up routes, timers, middleware, etc
+        $_script = $PodeContext.Server.Logic
+        if (Test-PodePath -Path $PodeContext.Server.LogicPath -NoStatus) {
+            $_script = Convert-PodeFileToScriptBlock -FilePath $PodeContext.Server.LogicPath
+        }
+
+        Invoke-PodeScriptBlock -ScriptBlock $_script -NoNewClosure
+
+        # load any modules/snapins
+        Import-PodeSnapinsIntoRunspaceState
+        Import-PodeModulesIntoRunspaceState
+
+        # load any functions
+        Import-PodeFunctionsIntoRunspaceState -ScriptBlock $_script
+
+        # start the runspace pools for web, schedules, etc
         New-PodeRunspacePools
+        Open-PodeRunspacePools
 
         # create timer/schedules for auto-restarting
         New-PodeAutoRestartServer
@@ -54,10 +71,6 @@ function Start-PodeInternalServer
                 $endpoints += (Start-PodeWebServer -Browse:$Browse)
             }
 
-            'PODE' {
-                $endpoints += (Start-PodeSocketServer -Browse:$Browse)
-            }
-
             'SERVICE' {
                 Start-PodeServiceServer
             }
@@ -76,11 +89,14 @@ function Start-PodeInternalServer
             $endpoints += (Start-PodeSignalServer)
         }
 
+        # set the start time of the server (start and after restart)
+        $PodeContext.Metrics.Server.StartTime = [datetime]::UtcNow
+
         # state what endpoints are being listened on
         if ($endpoints.Length -gt 0) {
-            Write-Host "Listening on the following $($endpoints.Length) endpoint(s) [$($PodeContext.Threads) thread(s)]:" -ForegroundColor Yellow
+            Write-PodeHost "Listening on the following $($endpoints.Length) endpoint(s) [$($PodeContext.Threads.Web) thread(s)]:" -ForegroundColor Yellow
             $endpoints | ForEach-Object {
-                Write-Host "`t- $($_)" -ForegroundColor Yellow
+                Write-PodeHost "`t- $($_)" -ForegroundColor Yellow
             }
         }
     }
@@ -94,7 +110,7 @@ function Restart-PodeInternalServer
     try
     {
         # inform restart
-        Write-Host 'Restarting server...' -NoNewline -ForegroundColor Cyan
+        Write-PodeHost 'Restarting server...' -NoNewline -ForegroundColor Cyan
 
         # cancel the session token
         $PodeContext.Tokens.Cancellation.Cancel()
@@ -118,6 +134,11 @@ function Restart-PodeInternalServer
         $PodeContext.Schedules.Clear()
         $PodeContext.Server.Logging.Types.Clear()
 
+        # auto-importers
+        $PodeContext.Server.AutoImport.Modules.ExportList = @()
+        $PodeContext.Server.AutoImport.Snapins.ExportList = @()
+        $PodeContext.Server.AutoImport.Functions.ExportList = @()
+
         # clear middle/endware
         $PodeContext.Server.Middleware = @()
         $PodeContext.Server.Endware = @()
@@ -126,33 +147,38 @@ function Restart-PodeInternalServer
         $PodeContext.Server.BodyParsers.Clear()
 
         # clear endpoints
-        $PodeContext.Server.Endpoints = @()
+        $PodeContext.Server.Endpoints.Clear()
+        $PodeContext.Server.EndpointsMap.Clear()
+
+        # clear openapi
+        $PodeContext.Server.OpenAPI = Get-PodeOABaseObject
 
         # clear the sockets
-        $PodeContext.Server.Sockets.Listeners = @()
-        $PodeContext.Server.Sockets.Queues.Connections = [System.Collections.Concurrent.ConcurrentQueue[System.Net.Sockets.SocketAsyncEventArgs]]::new()
-
-        # clear the websockets
-        $PodeContext.Server.WebSockets.Listeners = @()
-        $PodeContext.Server.WebSockets.Queues.Sockets.Clear()
-        $PodeContext.Server.WebSockets.Queues.Connections = [System.Collections.Concurrent.ConcurrentQueue[System.Net.Sockets.SocketAsyncEventArgs]]::new()
+        $PodeContext.Server.Sockets.Listener = $null
+        $PodeContext.Server.WebSockets.Listener = $null
 
         # set view engine back to default
         $PodeContext.Server.ViewEngine = @{
             Type = 'html'
             Extension = 'html'
-            Script = $null
+            ScriptBlock = $null
+            UsingVariables = $null
             IsDynamic = $false
         }
 
         # clear up cookie sessions
-        $PodeContext.Server.Cookies.Session.Clear()
+        $PodeContext.Server.Sessions.Clear()
 
         # clear up authentication methods
         $PodeContext.Server.Authentications.Clear()
 
         # clear up shared state
         $PodeContext.Server.State.Clear()
+
+        # reset type if smtp/tcp
+        if (@('smtp', 'tcp') -icontains $PodeContext.Server.Type) {
+            $PodeContext.Server.Type = [string]::Empty
+        }
 
         # recreate the session tokens
         Close-PodeDisposable -Disposable $PodeContext.Tokens.Cancellation
@@ -164,9 +190,10 @@ function Restart-PodeInternalServer
         # reload the configuration
         $PodeContext.Server.Configuration = Open-PodeConfiguration -Context $PodeContext
 
-        Write-Host " Done" -ForegroundColor Green
+        Write-PodeHost " Done" -ForegroundColor Green
 
         # restart the server
+        $PodeContext.Metrics.Server.RestartCount++
         Start-PodeInternalServer
     }
     catch {

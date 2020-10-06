@@ -1,6 +1,6 @@
 # Overview
 
-Middleware in Pode allows you to observe and edit the request/response objects for a current web event - you can alter the response, add custom objects to the web event for later use, or terminate the response without processing the main Route logic.
+Middleware in Pode allows you to observe and edit the request/response objects for a current [web event](../../WebEvent) - you can alter the response, add custom objects to the [web event](../../WebEvent) for later use, or terminate the response without processing the main Route logic.
 
 Middleware is supported in both a global scope, using  [`Add-PodeMiddleware`](../../../Functions/Core/Add-PodeMiddleware), as well as at the Route level using the `-Middleware` parameter on  [`Add-PodeMiddleware`](../../../Functions/Core/Add-PodeMiddleware),
 
@@ -10,7 +10,7 @@ Pode itself has some inbuilt Middleware, which is overridable, so you can use yo
 
 To setup and use middleware in Pode you use the Middleware function:  [`Add-PodeMiddleware`](../../../Functions/Core/Add-PodeMiddleware). This will setup global middleware that will run, in the order created, on every request prior to any Route logic being invoked.
 
-The function takes a ScriptBlock, which itself accepts a single parameter for the current web event (similar to Routes). The event object passed contains the current `Request` and `Response` objects - you can also add more custom objects to it, as the event is just a `hashtable`.
+The function takes a ScriptBlock, which itself accepts a single parameter for the current [web event](../../WebEvent) (similar to Routes). The event object passed contains the current `Request` and `Response` objects - you can also add more custom objects to it, as the event is just a `hashtable`.
 
 If you want to keep processing and proceed to the next Middleware/Route then `return $true` from the ScriptBlock, otherwise `return $false` and the response will be closed immediately.
 
@@ -40,11 +40,14 @@ Start-PodeServer {
 }
 ```
 
-Where as the following example is Middleware that will only be run on requests against the `/api` route. Here, it will run Basic Authentication on every API request. You'll notice that this time we're piping  [`Get-PodeAuthMiddleware`](../../../Functions/Authentication/Get-PodeAuthMiddleware), this is because it returns valid Middleware.
+Where as the following example is Middleware that will only be run on requests against the `/api` route. Here, we're just going to do something simple, which is to write a message to the console for all `/api` requests:
 
 ```powershell
 Start-PodeServer {
-    Get-PodeAuthMiddleware -Name 'Main' | Add-PodeMiddleware -Name 'GlobalApiAuthCheck' -Route '/api'
+    Add-PodeMiddleware -Name 'GlobalApiAuthCheck' -Route '/api' -ScriptBlock {
+        'Hello!' | Out-PodeHost
+        return $true
+    }
 }
 ```
 
@@ -93,7 +96,7 @@ Although you can define your own custom middleware, Pode does have some inbuilt 
 | ----- | ---------- | ----------- |
 | 1 | **Access Rules** | Allowing/Denying IP addresses (if access rules have been defined) |
 | 2 | **Rate Limiting** | Limiting access to IP addresses (if rate limiting rules have been defined) |
-| 3 | **Static Content** | Static Content such as images/css/js/html in the `/public` directory (or other defined static routes) |
+| 3 | **Static Content** | Static Content, such as images/css/js/html, in the `/public` directory |
 | 4 | **Body Parsing** | Parsing request payload as JSON, XML, or other types |
 | 5 | **Query String** | Getting any query string parameters currently on the request URL |
 | 6 | **Cookie Parsing** | Parse the cookies from the request's header (this only applies to serverless) |

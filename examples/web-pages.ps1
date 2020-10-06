@@ -10,11 +10,10 @@ Import-Module "$($path)/src/Pode.psm1" -Force -ErrorAction Stop
 # Import-Module Pode
 
 # create a server, and start listening on port 8085
-Start-PodeServer -Threads 2 -Browse {
-
+Start-PodeServer -Threads 2 {
     # listen on localhost:8085
     Add-PodeEndpoint -Address * -Port 8090 -Protocol Http -Name '8090Address'
-    Add-PodeEndpoint -Address * -Port $Port -Protocol Http -RedirectTo '8090Address'
+    Add-PodeEndpoint -Address * -Port $Port -Protocol Http -Name '8085Address' -RedirectTo '8090Address'
 
     # allow the local ip and some other ips
     Add-PodeAccessRule -Access Allow -Type IP -Values @('127.0.0.1', '[::1]')
@@ -26,7 +25,7 @@ Start-PodeServer -Threads 2 -Browse {
     Add-PodeAccessRule -Access Deny -Type IP -Values all
 
     # log requests to the terminal
-    New-PodeLoggingMethod -Terminal | Enable-PodeRequestLogging
+    New-PodeLoggingMethod -Terminal -Batch 10 -BatchTimeout 10 | Enable-PodeRequestLogging
     New-PodeLoggingMethod -Terminal | Enable-PodeErrorLogging
 
     # set view engine to pode renderer
@@ -48,7 +47,7 @@ Start-PodeServer -Threads 2 -Browse {
     # GET request for web page on "localhost:8085/"
     Add-PodeRoute -Method Get -Path '/' -ScriptBlock {
         param($e)
-        $e.Request | Write-PodeLog -Name 'custom'
+        # $e.Request | Write-PodeLog -Name 'custom'
         Write-PodeViewResponse -Path 'simple' -Data @{ 'numbers' = @(1, 2, 3); }
     }
 
@@ -93,6 +92,7 @@ Start-PodeServer -Threads 2 -Browse {
         Write-PodeJsonResponse -Value @{ 'value' = 'works for every hello route' }
     }
 
+    $hmm = 'well well'
     Add-PodeRoute -Method Get -Path '/script' -FilePath './modules/route_script.ps1'
 
 }

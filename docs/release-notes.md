@@ -1,5 +1,179 @@
 # Release Notes
 
+## v1.8.3
+
+```plain
+### Enhancements
+* #602: Adds a new `Remove-PodeOAResponse` function to allow removing of default responses
+* #603: Adds a new `-Enum` parameter onto the OpenAPI property functions
+```
+
+## v1.8.2
+
+```plain
+### Bugs
+* #594: Add `Import-PodeSnapIn` to FunctionsToExport list
+```
+
+## v1.8.1
+
+```plain
+### Bugs
+* #578: Fixes OpenAPI functions with rogue "=" on returning a value
+* #581: Fixes large messages being sent via web sockets
+```
+
+## v1.8.0
+
+```plain
+### Enhancements
+* #533: Support on states for inclusion/exlcusions when saving, and scopes on states
+* #538: Support to batch log items together before sending them off to be recorded
+* #540: Adds a Ctrl+B shortcutto open the server in the default browser
+* #542: Add new switch to help toggling of Status Page exception message
+* #548: Adds new `Get-PodeSchedule` and `Get-PodeTimer` functions
+* #549: Support for calculating a schedule's next trigger datetime
+
+### Bugs
+* #532: Fixes a bug in `Get-PodeRoute` when a route is bound to multiple endpoints
+* #547: Fixes a bug where not all data was being read on SMTP messages
+* #558: Paths with URL encoded characters fail when trying to load static content
+
+### Documentation
+* #381: Documentation on using Pode in Heroku (plus auto-detection support)
+
+### Packaging
+* #546: Adds automated integration tests
+* #562: Remove AppVeyor and TravisCI in favour of GitHub Actions
+* #567: Bump Powershell version in Docker to 7.0.1
+* #569: Bump version of MkDocs and Material Theme
+```
+
+## v1.7.3
+
+```plain
+### Bugs
+* #554: Fixes an issue where HTML static files would be treated as dynamic files
+```
+
+## v1.7.2
+
+```plain
+### Bugs
+* #543: Fixes an internal issue that was causing errors in the SMTP server
+```
+
+## v1.7.1
+
+```plain
+### Bugs
+* #534: Fixes an issue with IIS Windows Authentication when using foreign trusted domains (thanks @RobinBeismann!)
+```
+
+## v1.7.0
+
+```plain
+### Features
+* #504: Support for GZip and Deflate compression on Requests
+* #507: Support for GZip and Deflate compression on Responses
+* #510: New inbuilt authenticator to allow authenticating users from a file
+
+### Enhancements
+* #511: Adds middleware support to `Add-PodeStaticRoute`
+* #518: New `Get-PodeEndpoint` function to retrieve and filter endpoints
+* #525: Support for Azure Web Apps, fixes DisableTermination, and adds Quiet switch
+
+### Bugs
+* #509: Fixes a freezing bug caused by sessions - and improves performance of sessions
+
+### Documentation
+* #517: Adds missing `-Sessionless` parameter in IIS docs (thanks @RobinBeismann!)
+
+### Packaging
+* #503: Bump the Docker images to PowerShell v7.0
+```
+
+## v1.6.1
+
+```plain
+### Bugs
+* 495: Fix issue with parsing query strings when using the Pode server type
+
+### Documentation
+* #496: When using IIS, install Pode using AllUsers scope
+* #497: Comments about using PowerShell classes in Pode, under Known Issues
+```
+
+## v1.6.0
+
+```plain
+### Features
+* #464: Request metrics for routes for the number of requests
+* #473: Digest Authentication support (with added support for PostValidator scripts)
+* #478: Bearer Authentication support (with support for scope validation)
+
+### Enhancements
+* #425: Adds functions to get routes: `Get-PodeRoute` and `Get-PodeStaticRoute`
+* #474: The inbuilt Windows AD authentication now works cross-platform!
+* #475: Adds support for hosting a Pode server via IIS
+
+### Bugs
+* #477: Fix QueryString parsing on Pode server type
+
+### Documentation
+* #484: Information about Web Events and their structure
+```
+
+## v1.5.0
+
+```plain
+### Features
+* #218: Adds OpenAPI with Swagger and ReDoc support
+
+### Enhancements
+* #458: Adds a Timestamp to the event object passed to Routes/Middleware
+* #459: Ability to get the Uptime and Restart Count of the server
+
+### Bugs
+* #461: Fix the parsing of payloads in Azure Functions and AWS Lambdas
+* #465: Format fix in the OpenAPI examples (thanks @haidouks!)
+
+### Packaging
+* #470: Bumps the version of the MkDocs Material theme to 4.6.0
+```
+
+## v1.4.0
+
+```plain
+### Enhancements
+* #447: Sessions can now be used via Headers for better CLI support
+* #448: `-EndpointName` on routes can now take an array of endpoint names
+* #454: New wrapper function, `Start-PodeStaticServer`, for simple static websites
+
+### Bugs
+* #446: Fixes functions that were not in accordence with Coding Guidelines (thanks @jhainau!)
+
+### Documentation
+* #445: Improved documentation on using CSRF middleware
+```
+
+## v1.3.0
+
+```plain
+### Enhancements
+* #421: Adds a new `-FilePath` parameter to the `Add-PodeTimer` and `Add-PodeSchedule` functions
+* #422: Adds a new `-FilePath` parameter to the `Start-PodeServer` function
+* #423: New `Edit-PodeSchedule` and `Edit-PodeSchedule` functions
+* #431: Support for the `WWW-Authenticate` header on failed Authentication (401) responses
+* #433: Support in custom Authentication types to allow returning extra Headers on the response
+* #435: New `Set-PodeScheduleConcurrency` function to set the max number of concurrent schedules
+* #440: Adds support in the `package.json` for custom PowerShell Repositories
+
+### Bugs
+* #429: Running `pode start` failed to invoke server script on some platforms
+* #441: Fixes an issue where local modules failed to resolve correct path
+```
+
 ## v1.2.1
 
 ```plain

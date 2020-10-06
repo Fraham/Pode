@@ -17,8 +17,17 @@ function Invoke-PodeEndware
     # loop through each of the endware, invoking the next if it returns true
     foreach ($eware in @($Endware))
     {
+        if (($null -eq $eware) -or ($null -eq $eware.Logic)) {
+            continue
+        }
+
         try {
-            Invoke-PodeScriptBlock -ScriptBlock $eware.Logic -Arguments (@($WebEvent) + @($eware.Arguments)) -Scoped -Splat | Out-Null
+            $_args = @($WebEvent) + @($eware.Arguments)
+            if ($null -ne $eware.UsingVariables) {
+                $_args = @($eware.UsingVariables.Value) + $_args
+            }
+
+            Invoke-PodeScriptBlock -ScriptBlock $eware.Logic -Arguments $_args -Scoped -Splat | Out-Null
         }
         catch {
             $_ | Write-PodeErrorLog
